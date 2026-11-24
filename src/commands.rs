@@ -1,0 +1,441 @@
+use crate::downloader::{DownloadTaskDto, EngineStatusDto};
+use crate::state::{is_internal_url, AppState, BrowserSnapshot};
+use crate::storage::{Bookmark, BrowserSettings, HistoryEntry, OmniboxSuggestion};
+use crate::tabs::{
+    close_tab, create_tab, emit_state, layout_webviews, navigate_tab, sleep_all_inactive_tabs,
+    sleep_tab, switch_tab, toggle_fullscreen_mode,
+};
+use crate::util::extract_host;
+use tauri::{AppHandle, Manager, State};
+
+fn eval_in_tab(app: &AppHandle, tab_id: &str, js: &str) {
+    if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+        let _ = wv.eval(js);
+    }
+}
+
+#[tauri::command]
+pub fn get_state(state: State<'_, AppState>) -> BrowserSnapshot {
+    state.snapshot()
+}
+
+#[tauri::command]
+pub async fn cmd_new_tab(
+    app: AppHandle,
+    url: Option<String>,
+    incognito: Option<bool>,
+) -> Result<String, String> {
+    create_tab(&app, url, incognito.unwrap_or(false), true)
+}
+
+#[tauri::command]
+pub async fn cmd_switch_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
+    switch_tab(&app, &tab_id)
+}
+
+#[tauri::command]
+pub async fn cmd_close_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
+    close_tab(&app, &tab_id)
+}
+
+#[tauri::command]
+pub async fn cmd_reopen_closed_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let closed = state.inner.lock().unwrap().closed_tabs.pop();
+    if let Some(c) = closed {
+        Ok(Some(create_tab(&app, Some(c.url), c.is_incognito, true)?))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn cmd_navigate(app: AppHandle, tab_id: String, input: String) -> Result<(), String> {
+    navigate_tab(&app, &tab_id, &input)
+}
+
+#[tauri::command]
+pub fn cmd_tab_back(app: AppHandle, tab_id: String) -> Result<(), String> {
+    eval_in_tab(&app, &tab_id, "window.history.back()");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_tab_forward(app: AppHandle, tab_id: String) -> Result<(), String> {
+    eval_in_tab(&app, &tab_id, "window.history.forward()");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_tab_reload(app: AppHandle, tab_id: String) -> Result<(), String> {
+    eval_in_tab(&app, &tab_id, "window.location.reload()");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_tab_zoom(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+    delta: f64,
+    reset: Option<bool>,
+) -> Result<f64, String> {
+    let new_zoom = {
+        let mut guard = state.inner.lock().unwrap();
+        let tab = guard
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == tab_id)
+            .ok_or_else(|| "Tab not found".to_string())?;
+        tab.zoom = if reset.unwrap_or(false) {
+            1.0
+        } else {
+            (tab.zoom + delta).clamp(0.5, 2.5)
+        };
+        tab.zoom
+    };
+    if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+        let _ = wv.set_zoom(new_zoom);
+    }
+    emit_state(&app);
+    Ok(new_zoom)
+}
+
+#[tauri::command]
+pub fn cmd_toggle_pin_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+) -> Result<(), String> {
+    if let Some(tab) = state
+        .inner
+        .lock()
+        .unwrap()
+        .tabs
+        .iter_mut()
+        .find(|t| t.id == tab_id)
+    {
+        tab.pinned = !tab.pinned;
+    }
+    emit_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_sleep_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
+    sleep_tab(&app, &tab_id)
+}
+
+#[tauri::command]
+pub async fn cmd_sleep_inactive_tabs(app: AppHandle) -> usize {
+    sleep_all_inactive_tabs(&app)
+}
+
+#[tauri::command]
+pub fn cmd_open_devtools(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let active_label = {
+        let guard = state.inner.lock().unwrap();
+        guard
+            .active_tab_id
+            .as_ref()
+            .and_then(|id| guard.tabs.iter().find(|t| &t.id == id))
+            .filter(|t| t.has_webview && !t.is_sleeping)
+            .map(|t| t.webview_label())
+    };
+    let target_label = active_label.as_deref().unwrap_or("chrome");
+    if let Some(wv) = app.get_webview(target_label) {
+        if wv.is_devtools_open() {
+            wv.close_devtools();
+        } else {
+            wv.open_devtools();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_set_panel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    panel: Option<String>,
+) -> Result<(), String> {
+    {
+        let mut guard = state.inner.lock().unwrap();
+        guard.active_panel = if guard.active_panel == panel {
+            None
+        } else {
+            panel
+        };
+    }
+    layout_webviews(&app);
+    emit_state(&app);
+    Ok(())
+}
+
+// ---- Bookmarks ----
+
+#[tauri::command]
+pub fn cmd_list_bookmarks(state: State<'_, AppState>) -> Vec<Bookmark> {
+    state.storage.list_bookmarks()
+}
+
+#[tauri::command]
+pub fn cmd_toggle_bookmark(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    title: String,
+    url: String,
+) -> Result<bool, String> {
+    if is_internal_url(&url) || url.trim().is_empty() {
+        return Ok(false);
+    }
+    let added = if state.storage.is_bookmarked(&url) {
+        state.storage.remove_bookmark_by_url(&url)?;
+        false
+    } else {
+        state.storage.add_bookmark(&title, &url, "Bookmarks Bar")?;
+        true
+    };
+    emit_state(&app);
+    Ok(added)
+}
+
+#[tauri::command]
+pub fn cmd_remove_bookmark(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<(), String> {
+    state.storage.remove_bookmark_by_url(&url)?;
+    emit_state(&app);
+    Ok(())
+}
+
+// ---- History & Omnibox ----
+
+#[tauri::command]
+pub fn cmd_list_history(state: State<'_, AppState>, query: Option<String>) -> Vec<HistoryEntry> {
+    state.storage.list_history(&query.unwrap_or_default(), 150)
+}
+
+#[tauri::command]
+pub fn cmd_delete_history_entry(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.storage.delete_history_entry(id)
+}
+
+#[tauri::command]
+pub fn cmd_clear_history(state: State<'_, AppState>) -> Result<(), String> {
+    state.storage.clear_history()
+}
+
+#[tauri::command]
+pub fn cmd_search_omnibox(state: State<'_, AppState>, query: String) -> Vec<OmniboxSuggestion> {
+    state.storage.search_omnibox(&query)
+}
+
+#[tauri::command]
+pub fn cmd_open_path(path: String, reveal_in_folder: Option<bool>) -> Result<(), String> {
+    let reveal = reveal_in_folder.unwrap_or(false);
+    #[cfg(target_os = "windows")]
+    {
+        if reveal {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let target = if reveal {
+            std::path::Path::new(&path)
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or(&path)
+                .to_string()
+        } else {
+            path
+        };
+        std::process::Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// ---- Settings & AdBlock ----
+
+#[tauri::command]
+pub async fn cmd_update_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: BrowserSettings,
+) -> Result<(), String> {
+    state.storage.save_settings(&settings)?;
+    state.inner.lock().unwrap().settings = settings;
+    layout_webviews(&app);
+    emit_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_toggle_adblock_site(app: AppHandle, state: State<'_, AppState>, host: String) -> bool {
+    let allowlisted = state.adblock.toggle_allowlist(&host);
+    emit_state(&app);
+    allowlisted
+}
+
+#[tauri::command]
+pub fn cmd_is_site_allowlisted(state: State<'_, AppState>, host: String) -> bool {
+    state.adblock.is_allowlisted(&host)
+}
+
+#[tauri::command]
+pub fn cmd_toggle_popup_site(app: AppHandle, state: State<'_, AppState>, host: String) -> bool {
+    let allowlisted = state.adblock.toggle_popup_allowlist(&host);
+    emit_state(&app);
+    allowlisted
+}
+
+#[tauri::command]
+pub fn cmd_is_popup_site_allowlisted(state: State<'_, AppState>, host: String) -> bool {
+    state.adblock.is_popup_allowlisted(&host)
+}
+
+#[tauri::command]
+pub async fn cmd_open_blocked_popup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+    always_allow_site: Option<bool>,
+) -> Result<(), String> {
+    let (popup_url, source_host) = {
+        let mut guard = state.inner.lock().unwrap();
+        let tab = guard
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == tab_id)
+            .ok_or_else(|| "Tab not found".to_string())?;
+        (
+            tab.last_blocked_popup.take(),
+            extract_host(&tab.url).unwrap_or_default(),
+        )
+    };
+
+    if always_allow_site.unwrap_or(false) && !source_host.is_empty() {
+        state.adblock.allow_popup_site(&source_host);
+    }
+
+    if let Some(url) = popup_url {
+        let _ = create_tab(&app, Some(url), false, true);
+    } else {
+        emit_state(&app);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_toggle_fullscreen(app: AppHandle) -> Result<bool, String> {
+    Ok(toggle_fullscreen_mode(&app))
+}
+
+// ---- Unified Download Manager (IDM + yt-dlp + Native BitTorrent) ----
+
+#[tauri::command]
+pub fn cmd_dm_list(state: State<'_, AppState>) -> Vec<DownloadTaskDto> {
+    state.dm.list_tasks()
+}
+
+#[tauri::command]
+pub fn cmd_dm_engine_status(state: State<'_, AppState>) -> EngineStatusDto {
+    state.dm.engine_status()
+}
+
+#[tauri::command]
+pub async fn cmd_dm_install_ytdlp(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state.dm.install_ytdlp(app).await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_start_http(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    connections: Option<u32>,
+    filename: Option<String>,
+) -> Result<String, String> {
+    state
+        .dm
+        .start_http_download(app, url, connections.unwrap_or(8), filename)
+        .await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_start_video(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    quality: Option<String>,
+) -> Result<String, String> {
+    state
+        .dm
+        .start_video_download(app, url, quality.unwrap_or_else(|| "best".to_string()))
+        .await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_start_torrent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    magnet_or_url: String,
+) -> Result<String, String> {
+    state.dm.start_torrent_download(app, magnet_or_url).await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_pause(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.dm.pause_task(app, &id).await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_resume(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.dm.resume_task(app, &id).await
+}
+
+#[tauri::command]
+pub async fn cmd_dm_cancel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.dm.cancel_task(app, &id).await
+}
+
+#[tauri::command]
+pub fn cmd_dm_remove(app: AppHandle, state: State<'_, AppState>, id: String) {
+    state.dm.remove_task(app, &id);
+}
+
+#[tauri::command]
+pub fn cmd_dm_clear_finished(app: AppHandle, state: State<'_, AppState>) {
+    state.dm.clear_finished(app);
+}

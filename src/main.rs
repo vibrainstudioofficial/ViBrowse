@@ -1,0 +1,113 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+mod adblock;
+mod commands;
+mod downloader;
+mod state;
+mod storage;
+mod tabs;
+mod util;
+
+use state::AppState;
+use storage::Storage;
+use tabs::{create_tab, layout_webviews, start_tab_sleeper_loop};
+use tauri::webview::WebviewBuilder;
+use tauri::window::WindowBuilder;
+use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WindowEvent};
+
+fn main() {
+    tauri::Builder::default()
+        .setup(|app| {
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("vibrowse"));
+            let db_path = data_dir.join("vibrowse.db");
+            let storage =
+                Storage::open(db_path).expect("Failed to initialize ViBrowse SQLite database");
+            app.manage(AppState::new(storage, data_dir));
+
+            let init_w = 1320.0;
+            let init_h = 840.0;
+
+            let window = WindowBuilder::new(app, "main")
+                .title("ViBrowse")
+                .inner_size(init_w, init_h)
+                .min_inner_size(760.0, 500.0)
+                .center()
+                .build()?;
+
+            window.add_child(
+                WebviewBuilder::new("chrome", WebviewUrl::App("index.html".into())),
+                LogicalPosition::new(0.0, 0.0),
+                LogicalSize::new(init_w, init_h),
+            )?;
+
+            let panel_wv = window.add_child(
+                WebviewBuilder::new("panel", WebviewUrl::App("index.html?view=panel".into())),
+                LogicalPosition::new(init_w - 360.0, 84.0),
+                LogicalSize::new(360.0, init_h - 84.0),
+            )?;
+            let _ = panel_wv.hide();
+
+            let app_resize = app.handle().clone();
+            window.on_window_event(move |event| {
+                if matches!(
+                    event,
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+                ) {
+                    layout_webviews(&app_resize);
+                }
+            });
+
+            let _ = create_tab(app.handle(), None, false, true);
+            start_tab_sleeper_loop(app.handle().clone());
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::get_state,
+            commands::cmd_new_tab,
+            commands::cmd_switch_tab,
+            commands::cmd_close_tab,
+            commands::cmd_reopen_closed_tab,
+            commands::cmd_navigate,
+            commands::cmd_tab_back,
+            commands::cmd_tab_forward,
+            commands::cmd_tab_reload,
+            commands::cmd_tab_zoom,
+            commands::cmd_toggle_pin_tab,
+            commands::cmd_sleep_tab,
+            commands::cmd_sleep_inactive_tabs,
+            commands::cmd_open_devtools,
+            commands::cmd_set_panel,
+            commands::cmd_list_bookmarks,
+            commands::cmd_toggle_bookmark,
+            commands::cmd_remove_bookmark,
+            commands::cmd_list_history,
+            commands::cmd_delete_history_entry,
+            commands::cmd_clear_history,
+            commands::cmd_search_omnibox,
+            commands::cmd_open_path,
+            commands::cmd_update_settings,
+            commands::cmd_toggle_adblock_site,
+            commands::cmd_is_site_allowlisted,
+            commands::cmd_toggle_popup_site,
+            commands::cmd_is_popup_site_allowlisted,
+            commands::cmd_open_blocked_popup,
+            commands::cmd_toggle_fullscreen,
+            commands::cmd_dm_list,
+            commands::cmd_dm_engine_status,
+            commands::cmd_dm_install_ytdlp,
+            commands::cmd_dm_start_http,
+            commands::cmd_dm_start_video,
+            commands::cmd_dm_start_torrent,
+            commands::cmd_dm_pause,
+            commands::cmd_dm_resume,
+            commands::cmd_dm_cancel,
+            commands::cmd_dm_remove,
+            commands::cmd_dm_clear_finished,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running ViBrowse");
+}

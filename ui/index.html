@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ViBrowse</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- TOP CHROME BAR -->
+    <header id="chrome-header">
+      <!-- TAB STRIP (38px) -->
+      <div id="tab-strip">
+        <div id="tabs-container"></div>
+        <div id="tab-actions">
+          <button id="btn-new-tab" class="icon-btn" title="New Tab (Ctrl+T)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button id="btn-new-incognito" class="icon-btn incognito-accent" title="New Incognito Tab (Ctrl+Shift+N)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M2 12h20"/><path d="M6 12l2-6h8l2 6"/><circle cx="8" cy="17" r="3"/><circle cx="16" cy="17" r="3"/><path d="M11 17h2"/></svg>
+          </button>
+        </div>
+        <div id="ram-pill" title="Click to sleep all inactive tabs and free RAM">
+          <span class="ram-dot"></span>
+          <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <span id="ram-pill-text">RAM Saver</span>
+        </div>
+      </div>
+
+      <!-- NAVIGATION TOOLBAR (46px) -->
+      <div id="nav-toolbar">
+        <div class="nav-group">
+          <button id="btn-back" class="icon-btn" title="Back (Alt+Left)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+          </button>
+          <button id="btn-forward" class="icon-btn" title="Forward (Alt+Right)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+          </button>
+          <button id="btn-reload" class="icon-btn" title="Reload (Ctrl+R)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+          <button id="btn-home" class="icon-btn" title="New Tab">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>
+          </button>
+        </div>
+
+        <div id="omnibox-wrap">
+          <span id="security-badge" class="security-badge" title="Connection info">
+            <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+          </span>
+          <input
+            id="omnibox"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Search Google or type a URL..."
+          />
+          <button id="btn-bookmark" class="omnibox-btn" title="Bookmark this page (Ctrl+D)">
+            <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <div id="omnibox-dropdown" class="hidden"></div>
+        </div>
+
+        <div class="nav-group">
+          <button id="btn-media-sniffer" class="tool-btn media-pill hidden" title="Video / Media detected on this page — Click to download">
+            <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
+            <span id="media-count">0</span>
+          </button>
+          <button id="btn-popup-blocked" class="tool-btn popup-pill hidden" title="Popup blocked on this page">
+            <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
+            <span>Popup</span>
+          </button>
+          <button id="btn-adblock" class="tool-btn" title="Ad &amp; Popup Blocker">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span id="adblock-count" class="badge">0</span>
+          </button>
+          <button id="btn-panel-bookmarks" class="icon-btn" title="Bookmarks">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          <button id="btn-panel-history" class="icon-btn" title="History (Ctrl+H)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </button>
+          <button id="btn-panel-downloads" class="icon-btn" title="Downloads (Ctrl+J)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button id="btn-devtools" class="icon-btn" title="DevTools (F12)">
+            <svg class="ui-icon" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </button>
+          <button id="btn-theme-toggle" class="icon-btn" title="Switch Light / Dark Mode">
+            <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </button>
+          <button id="btn-panel-settings" class="icon-btn" title="Settings">
+            <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.25.4-1.51 1z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- BOOKMARKS BAR (30px, optional) -->
+      <div id="bookmarks-bar" class="hidden"></div>
+    </header>
+
+    <!-- MAIN BODY (visible on New Tab Page, Downloads Dashboard + Right Side Panel) -->
+    <main id="workspace">
+      <!-- NEW TAB PAGE -->
+      <section id="newtab-page">
+        <div class="ntp-container">
+          <div class="ntp-brand">
+            <img src="logo.png" alt="ViBrowse Logo" class="ntp-logo" />
+            <div>
+              <h1 id="ntp-heading">ViBrowse</h1>
+              <p id="ntp-sub" class="muted">Lightweight Rust Browser • Full Chrome Compatibility</p>
+            </div>
+          </div>
+
+          <form id="ntp-search-form" class="ntp-search">
+            <span class="ntp-search-icon">
+              <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            </span>
+            <input
+              id="ntp-search-input"
+              type="text"
+              autocomplete="off"
+              placeholder="Search the web or enter a URL..."
+            />
+            <button type="submit">Go</button>
+          </form>
+
+          <div class="ntp-stats">
+            <div class="stat-card">
+              <div class="stat-value" id="stat-active">0</div>
+              <div class="stat-label">Active WebViews</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value accent-blue" id="stat-sleeping">0</div>
+              <div class="stat-label">Sleeping Tabs</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value accent-green" id="stat-ram">0 MB</div>
+              <div class="stat-label">Est. RAM Saved</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value accent-purple" id="stat-blocked">0</div>
+              <div class="stat-label">Ads / Trackers Blocked</div>
+            </div>
+          </div>
+
+          <div class="ntp-section-title">Quick Access</div>
+          <div id="ntp-dials" class="ntp-dials"></div>
+        </div>
+      </section>
+
+      <!-- FULL-PAGE DOWNLOAD MANAGER DASHBOARD (vibrowse://downloads) -->
+      <section id="downloads-page" class="hidden">
+        <div class="dm-container">
+          <div class="dm-top">
+            <div class="dm-title-row">
+              <span class="dm-hero-icon">
+                <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </span>
+              <div>
+                <h1>ViBrowse Download Manager</h1>
+                <p class="muted">IDM Multi-Connection Accelerator • YouTube/1000+ Video • Native BitTorrent P2P</p>
+              </div>
+            </div>
+            <div id="dm-engine-badges" class="dm-badges"></div>
+          </div>
+
+          <!-- ADD DOWNLOAD BAR -->
+          <div class="dm-add-card">
+            <div class="dm-mode-tabs">
+              <button class="dm-mode-btn active" data-mode="http">
+                <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <span>File / IDM</span>
+              </button>
+              <button class="dm-mode-btn" data-mode="video">
+                <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
+                <span>YouTube / Video</span>
+              </button>
+              <button class="dm-mode-btn" data-mode="torrent">
+                <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><path d="M6 15V7a6 6 0 1 1 12 0v8"/><path d="M6 15h4v4H6z"/><path d="M14 15h4v4h-4z"/></svg>
+                <span>Torrent / Magnet</span>
+              </button>
+            </div>
+            <form id="dm-add-form" class="dm-add-row">
+              <input id="dm-url-input" class="panel-search" placeholder="Tempel URL file (HTTP/HTTPS), YouTube/TikTok, atau Magnet link..." />
+              <select id="dm-conns-select" class="setting-select" title="Parallel IDM connections">
+                <option value="4">4 Koneksi</option>
+                <option value="8" selected>8 Koneksi (IDM)</option>
+                <option value="16">16 Koneksi</option>
+              </select>
+              <select id="dm-quality-select" class="setting-select hidden" title="Video quality">
+                <option value="best">Best MP4</option>
+                <option value="1080p">1080p MP4</option>
+                <option value="720p">720p MP4</option>
+                <option value="480p">480p MP4</option>
+                <option value="audio">Audio Only (M4A)</option>
+              </select>
+              <button type="submit" class="btn btn-primary btn-with-icon">
+                <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Mulai Unduh</span>
+              </button>
+            </form>
+            <div id="dm-add-error" class="dm-error hidden"></div>
+          </div>
+
+          <!-- FILTER BAR -->
+          <div class="dm-filter-bar">
+            <div class="dm-filters">
+              <button class="dm-filter-btn active" data-filter="all">Semua</button>
+              <button class="dm-filter-btn" data-filter="active">Aktif</button>
+              <button class="dm-filter-btn" data-filter="http">File (IDM)</button>
+              <button class="dm-filter-btn" data-filter="video">Video</button>
+              <button class="dm-filter-btn" data-filter="torrent">Torrent</button>
+              <button class="dm-filter-btn" data-filter="completed">Selesai</button>
+            </div>
+            <button id="dm-btn-clear-done" class="btn btn-danger">Bersihkan Selesai</button>
+          </div>
+
+          <!-- DOWNLOAD TASK LIST -->
+          <div id="dm-task-list" class="dm-task-list"></div>
+        </div>
+      </section>
+
+      <!-- ABOUT VIBROWSE PAGE (vibrowse://about) -->
+      <section id="about-page" class="hidden">
+        <div class="about-container">
+          <div class="about-hero">
+            <img src="logo.png" alt="ViBrowse Logo" class="about-logo" />
+            <div>
+              <div class="about-title-row">
+                <h1>ViBrowse</h1>
+                <span class="about-version">V1.1.a</span>
+              </div>
+              <p class="muted">Lightweight, Low-RAM, Chrome-Compatible Desktop Browser Built with Rust &amp; Tauri v2</p>
+            </div>
+          </div>
+
+          <div class="about-card">
+            <h3>Daftar Fitur Lengkap ViBrowse</h3>
+            <ul class="about-feature-list">
+              <li><strong>Multi-Tab &amp; Auto Tab Sleeping (RAM Saver)</strong> — Tab tidak aktif otomatis di-unload untuk membebaskan RAM, dilengkapi tombol Sleep manual, Pin Tab, dan Reopen Closed Tab (<code>Ctrl+Shift+T</code>).</li>
+              <li><strong>Native Ad-Blocker &amp; Smart Popup Blocker</strong> — Memblokir script/iframe iklan di level WebView2 sebelum keluar ke jaringan, menetralisir overlay klik transparan, serta memblokir tab baru pop-under lintas domain dengan opsi pengecualian per situs.</li>
+              <li><strong>Download Manager Terpadu (IDM + Video + Torrent)</strong> — Akselerator HTTP/HTTPS hingga 16 koneksi paralel, Video/Media Sniffer otomatis (<code>.mp4</code>/<code>.m3u8</code>), YouTube/1000+ situs via <code>yt-dlp</code> (1-klik install), dan Native Rust BitTorrent/Magnet (<code>librqbit</code>).</li>
+              <li><strong>Mode Incognito / Private Browsing</strong> — Profil terisolasi <code>InPrivate</code> tanpa menyimpan cookies, cache, maupun riwayat penjelajahan (<code>Ctrl+Shift+N</code>).</li>
+              <li><strong>Bookmarks, History &amp; Omnibox SQLite Lokal</strong> — Penyimpanan cepat SQLite WAL dengan Bookmarks Bar (<code>Ctrl+Shift+B</code>), Quick Access, dan autocomplete cerdas.</li>
+              <li><strong>True Monitor Fullscreen &amp; DevTools</strong> — Mendukung fullscreen video penuh satu layar monitor, toggle <code>F11</code>, Chrome DevTools (<code>F12</code>), Zoom, dan seluruh shortcut ala Chrome.</li>
+              <li><strong>Light Mode &amp; Dark Mode + Modern SVG UI</strong> — Beralih tema terang/gelap instan dari toolbar atau Settings dengan ikon vektor tajam di segala DPI.</li>
+            </ul>
+          </div>
+
+          <div class="about-grid">
+            <div class="about-card">
+              <h3>Rendering Engine</h3>
+              <p class="muted">WebView2 (Chromium Blink + V8) berbagi runtime OS — 100% kompatibel situs modern, YouTube, WebGL &amp; DevTools tanpa bloatware.</p>
+            </div>
+            <div class="about-card">
+              <h3>RAM Saver &amp; Tab Sleeping</h3>
+              <p class="muted">Tab tidak aktif otomatis di-unload oleh Tokio background worker untuk menghemat RAM tanpa kehilangan URL maupun posisi tab.</p>
+            </div>
+            <div class="about-card">
+              <h3>Ad &amp; Smart Popup Blocker</h3>
+              <p class="muted">Native WebView2 WebResourceRequested filter + pelindung pop-under lintas domain dengan pengecualian per situs.</p>
+            </div>
+            <div class="about-card">
+              <h3>IDM + Video + BitTorrent</h3>
+              <p class="muted">Download Manager 16-koneksi paralel, Video/Media Sniffer, yt-dlp (1000+ situs), dan Native Rust BitTorrent (librqbit).</p>
+            </div>
+          </div>
+
+          <div class="about-card">
+            <h3>Informasi Build &amp; Sesi</h3>
+            <div class="about-kv">
+              <span>Versi Aplikasi</span><strong>V1.1.a (1.1.0-a)</strong>
+              <span>Backend</span><strong>Rust 2021 + Tauri v2</strong>
+              <span>Penyimpanan Lokal</span><strong>SQLite WAL (rusqlite bundled)</strong>
+              <span>BitTorrent Engine</span><strong>librqbit 8.1 (Native Rust)</strong>
+              <span>Mode Tema</span><strong id="about-theme-val">Dark</strong>
+              <span>Iklan &amp; Tracker Diblokir</span><strong id="about-blocked-val">0</strong>
+              <span>Estimasi RAM Dihemat</span><strong id="about-ram-val">0 MB</strong>
+            </div>
+          </div>
+
+          <div class="panel-row">
+            <button id="about-open-dm" class="btn btn-primary btn-with-icon">
+              <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              <span>Buka Download Manager</span>
+            </button>
+            <button id="about-open-settings" class="btn btn-with-icon">
+              <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.25.4-1.51 1z"/></svg>
+              <span>Buka Settings</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT SIDE PANEL (360px when open) -->
+      <aside id="side-panel" class="hidden">
+        <div class="panel-header">
+          <h2 id="panel-title">Panel</h2>
+          <button id="btn-close-panel" class="icon-btn" title="Close panel">
+            <svg class="ui-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div id="panel-body"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

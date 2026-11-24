@@ -1,0 +1,19 @@
+# Rust / Cargo build artifacts
+/target/
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+
+# Compiled release binaries (uploaded to GitHub Releases instead of bloating git history)
+/release/**/*.exe
+/release/**/*.zip
+/release/**/*.msi
+/release/**/*.deb
+/release/**/*.rpm
+/release/**/*.AppImage
+/release/**/*.apk
+/release/**/*.aab
+/release/windows/ViBrowse-*-Portable/

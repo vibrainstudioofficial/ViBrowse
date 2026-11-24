@@ -1,0 +1,179 @@
+use crate::adblock::AdBlocker;
+use crate::downloader::{DetectedMedia, DownloadManager};
+use crate::storage::{BrowserSettings, Storage};
+use crate::util::extract_host;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Instant;
+
+pub const NEWTAB_URL: &str = "vibrowse://newtab";
+pub const DOWNLOADS_URL: &str = "vibrowse://downloads";
+pub const ABOUT_URL: &str = "vibrowse://about";
+pub const TOP_BAR_BASE_HEIGHT: f64 = 84.0;
+pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
+pub const SIDE_PANEL_WIDTH: f64 = 360.0;
+
+pub fn is_internal_url(url: &str) -> bool {
+    url == NEWTAB_URL || url == DOWNLOADS_URL || url == ABOUT_URL
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabDto {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub favicon: String,
+    pub is_incognito: bool,
+    pub is_sleeping: bool,
+    pub is_loading: bool,
+    pub pinned: bool,
+    pub zoom: f64,
+    pub is_bookmarked: bool,
+    pub last_blocked_popup: Option<String>,
+    pub detected_media: Vec<DetectedMedia>,
+}
+
+pub struct TabRecord {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub is_incognito: bool,
+    pub is_sleeping: bool,
+    pub is_loading: bool,
+    pub pinned: bool,
+    pub zoom: f64,
+    pub last_active: Instant,
+    pub has_webview: bool,
+    pub last_blocked_popup: Option<String>,
+    pub detected_media: Vec<DetectedMedia>,
+}
+
+impl TabRecord {
+    pub fn webview_label(&self) -> String {
+        format!("tab-{}", self.id)
+    }
+
+    pub fn to_dto(&self, is_bookmarked: bool) -> TabDto {
+        let favicon = if self.url.starts_with("http://") || self.url.starts_with("https://") {
+            extract_host(&self.url)
+                .map(|h| format!("https://www.google.com/s2/favicons?domain={}&sz=32", h))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        TabDto {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            url: self.url.clone(),
+            favicon,
+            is_incognito: self.is_incognito,
+            is_sleeping: self.is_sleeping,
+            is_loading: self.is_loading,
+            pinned: self.pinned,
+            zoom: self.zoom,
+            is_bookmarked,
+            last_blocked_popup: self.last_blocked_popup.clone(),
+            detected_media: self.detected_media.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClosedTab {
+    pub url: String,
+    pub is_incognito: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserSnapshot {
+    pub tabs: Vec<TabDto>,
+    pub active_tab_id: Option<String>,
+    pub active_panel: Option<String>,
+    pub settings: BrowserSettings,
+    pub adblock_blocked_count: u64,
+    pub sleeping_tabs_count: usize,
+    pub active_webviews_count: usize,
+    pub estimated_ram_saved_mb: usize,
+    pub is_fullscreen: bool,
+}
+
+pub struct InnerState {
+    pub tabs: Vec<TabRecord>,
+    pub active_tab_id: Option<String>,
+    pub closed_tabs: Vec<ClosedTab>,
+    pub active_panel: Option<String>,
+    pub settings: BrowserSettings,
+    pub is_fullscreen: bool,
+}
+
+pub struct AppState {
+    pub inner: Mutex<InnerState>,
+    pub storage: Storage,
+    pub adblock: AdBlocker,
+    pub dm: DownloadManager,
+}
+
+impl AppState {
+    pub fn new(storage: Storage, app_data_dir: PathBuf) -> Self {
+        let settings = storage.load_settings();
+        Self {
+            inner: Mutex::new(InnerState {
+                tabs: Vec::new(),
+                active_tab_id: None,
+                closed_tabs: Vec::new(),
+                active_panel: None,
+                settings,
+                is_fullscreen: false,
+            }),
+            storage,
+            adblock: AdBlocker::new(),
+            dm: DownloadManager::new(app_data_dir),
+        }
+    }
+
+    pub fn snapshot(&self) -> BrowserSnapshot {
+        let bookmarked = self.storage.bookmarked_urls_set();
+        let guard = self.inner.lock().unwrap();
+        let tabs: Vec<TabDto> = guard
+            .tabs
+            .iter()
+            .map(|t| t.to_dto(bookmarked.contains(&t.url)))
+            .collect();
+        let sleeping_tabs_count = guard.tabs.iter().filter(|t| t.is_sleeping).count();
+        let active_webviews_count = guard
+            .tabs
+            .iter()
+            .filter(|t| t.has_webview && !t.is_sleeping)
+            .count();
+        BrowserSnapshot {
+            tabs,
+            active_tab_id: guard.active_tab_id.clone(),
+            active_panel: guard.active_panel.clone(),
+            settings: guard.settings.clone(),
+            adblock_blocked_count: self.adblock.total_blocked(),
+            sleeping_tabs_count,
+            active_webviews_count,
+            estimated_ram_saved_mb: sleeping_tabs_count * 75,
+            is_fullscreen: guard.is_fullscreen,
+        }
+    }
+
+    pub fn top_bar_height(&self) -> f64 {
+        let guard = self.inner.lock().unwrap();
+        if guard.settings.show_bookmarks_bar {
+            TOP_BAR_BASE_HEIGHT + BOOKMARKS_BAR_HEIGHT
+        } else {
+            TOP_BAR_BASE_HEIGHT
+        }
+    }
+
+    pub fn side_panel_width(&self) -> f64 {
+        let guard = self.inner.lock().unwrap();
+        if guard.active_panel.is_some() {
+            SIDE_PANEL_WIDTH
+        } else {
+            0.0
+        }
+    }
+}
