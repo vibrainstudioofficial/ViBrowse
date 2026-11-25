@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/fransetiaone/ViBrowse/main/icons/128x128.png" alt="ViBrowse Logo" width="96" height="96" />
+  <img src="https://raw.githubusercontent.com/fransetiaone/ViBrowse/main/ui/logo.webp" alt="ViBrowse Logo" width="96" height="96" />
   <h1>ViBrowse</h1>
   <p><strong>Browser Desktop Modern yang Ultra-Ringan (~2.45 MB), Hemat RAM, &amp; Kompatibel Setara Google Chrome</strong></p>
   <p>

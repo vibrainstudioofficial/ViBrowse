@@ -74,7 +74,7 @@ d:\docker\vibrowse\
 │   ├── index.html              # Markup UI (Toolbar SVG, NTP, Dashboard IDM/Torrent, About ViBrowse)
 │   ├── styles.css              # Tema Dark Mode & Light Mode + styling modern SVG Lucide
 │   ├── app.js                  # Logika frontend modular, live listener, Chrome shortcuts
-│   └── logo.png                # Logo terkompresi (14.5 KB, 128x128 RGBA)
+│   └── logo.webp               # Logo terkompresi WebP (7.9 KB, 128x128 RGBA)
 ├── release/                    # Paket distribusi terpisah per OS
 │   ├── windows/                # ViBrowse-V1.2a-Setup.exe & ViBrowse-V1.2a-Portable.zip
 │   ├── linux/                  # Target output ViBrowse .deb & .rpm
