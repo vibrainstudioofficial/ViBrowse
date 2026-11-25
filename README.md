@@ -66,6 +66,25 @@ Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.
 
 ---
 
+## Ringkasan Update & Patch Terbaru
+
+Seluruh riwayat lengkap tersedia di [**CHANGELOG.md**](CHANGELOG.md):
+
+### `V1.2.1` (Terbaru)
+- **Patch**: Perbaikan bug login/logout Google & YouTube (whitelist seluruh domain autentikasi Google/YouTube).
+- **Fitur**: **Clear Cache & Cookies** 1-klik (`Webview::clear_all_browsing_data`) untuk paksa logout semua akun di panel *Profiles & Privacy* dan *Settings*.
+- **Fitur**: **Profile Management Terisolasi** — buat, pilih, dan hapus profil terpisah dengan warna custom & folder `data_directory` sendiri.
+- **Patch**: Perbaikan deteksi Default Browser di **Windows 11 (24H2+)** via key `UserChoiceLatest\ProgId`.
+- **Patch**: Perbaikan kompatibilitas build Linux WebKitGTK (`platform_wv.inner()` di Tauri v2.12) untuk paket `.deb` & `.rpm`.
+- **Distribusi**: Dual Mirror Download (**Cloudflare Edge** + **GitHub Releases**) untuk Windows, Debian/Ubuntu, Fedora/RHEL, & Source Code.
+
+### `V1.2a`
+- **Fitur**: Auto Update otomatis (`GitHub Releases` + fallback `browse.vibrain.id/version.json`) & banner cek Default Browser ala Chrome.
+- **Fitur**: Tombol floating **Download Video** ala IDM di pojok kanan atas player YouTube/X/HTML5 + tombol close (`×`) & pemilih kualitas.
+- **Patch**: Fix `yt-dlp 2026` (`--js-runtimes` + `--remote-components ejs:github` + 2-pass fallback + `PYTHONUTF8=1`) & perbaikan parse error installer `Setup.exe`.
+
+---
+
 ## Dokumentasi Teknis Lengkap
 
 Seluruh pembahasan arsitektur, pemilihan library, cara kerja engine, hingga referensi variabel & fungsi tersedia di folder [`app/dokumen/`](app/dokumen/README.md):

@@ -1,5 +1,7 @@
 use crate::adblock::build_tab_init_script;
-use crate::downloader::{is_video_platform_url, sniff_media_url, DetectedMedia};
+#[cfg(target_os = "windows")]
+use crate::downloader::sniff_media_url;
+use crate::downloader::{is_video_platform_url, DetectedMedia};
 use crate::state::{
     is_internal_url, tab_label, AppState, ClosedTab, TabRecord, ABOUT_URL, DOWNLOADS_URL,
     NEWTAB_URL,
@@ -623,7 +625,7 @@ fn attach_linux_webview_hooks(app: &AppHandle, label: &str) {
     let app = app.clone();
 
     let _ = wv.with_webview(move |platform_wv| {
-        let gtk_wv = platform_wv.webview();
+        let gtk_wv = platform_wv.inner();
         let app_enter = app.clone();
         gtk_wv.connect_enter_fullscreen(move |_| {
             set_fullscreen_mode(&app_enter, true);
