@@ -21,7 +21,7 @@
   </table>
   <p><strong>Browser Desktop Modern yang Ultra-Ringan (~2.45 MB), Hemat RAM, &amp; Kompatibel Setara Google Chrome</strong></p>
   <p>
-    <a href="https://browse.vibrain.id"><img src="https://img.shields.io/badge/Release-V1.2.1-2563eb?style=for-the-badge" alt="Version V1.2.1" /></a>
+    <a href="https://browse.vibrain.id"><img src="https://img.shields.io/badge/Release-V1.2.2-2563eb?style=for-the-badge" alt="Version V1.2.2" /></a>
     <img src="https://img.shields.io/badge/Built%20With-Rust%20%2B%20Tauri%20v2-f97316?style=for-the-badge" alt="Rust + Tauri v2" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=for-the-badge" alt="GPL-3.0 License" /></a>
   </p>
@@ -52,17 +52,17 @@
 
 ---
 
-## Unduh Rilis Resmi (V1.2.1)
+## Unduh Rilis Resmi (V1.2.2)
 
 Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.id/#unduh)** maupun **[GitHub Releases](https://github.com/fransetiaone/ViBrowse/releases/latest)**:
 
 | Platform | Paket | Ukuran | Tautan Unduh |
 | --- | --- | --- | --- |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.1-Setup.exe` | **~2.46 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-Setup.exe) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-Setup.exe) |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.1-Portable.zip` | **~2.93 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-Portable.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-Portable.zip) |
-| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2.1-linux-amd64.deb` | ~3–5 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-linux-amd64.deb) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-linux-amd64.deb) |
-| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2.1-linux-x86_64.rpm` | ~3–5 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-linux-x86_64.rpm) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-linux-x86_64.rpm) |
-| **Source Code (Compile Sendiri)** | `ViBrowse-V1.2.1-source.zip` | ~1.7 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-source.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-source.zip) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.2-Setup.exe` | **2.80 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-Setup.exe) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-Setup.exe) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.2-Portable.zip` | **3.35 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-Portable.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-Portable.zip) |
+| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2.2-linux-amd64.deb` | **2.7 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-linux-amd64.deb) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-linux-amd64.deb) |
+| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2.2-linux-x86_64.rpm` | **3.0 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-linux-x86_64.rpm) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-linux-x86_64.rpm) |
+| **Source Code (Compile Sendiri)** | `ViBrowse-V1.2.2-source.zip` | **182 KB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-source.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-source.zip) |
 
 ---
 
@@ -70,7 +70,11 @@ Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.
 
 Seluruh riwayat lengkap tersedia di [**CHANGELOG.md**](CHANGELOG.md):
 
-### `V1.2.1` (Terbaru)
+### `V1.2.2` (Terbaru)
+- **Upgrade Ad-Blocker (`Brave adblock-rust`)**: Mengganti pemblokir statis dengan engine **`adblock-rust`** milik Brave + auto-sync **EasyList**, **EasyPrivacy**, **ABPindo**, & **Peter Lowe** (100.000+ aturan) dengan binary cache cepat, cosmetic filtering dinamis, tombol sync manual, serta **YouTube Ad-Stripper & Auto-Skipper**.
+- **Catatan Ukuran File**: Pemblokiran iklan kini jauh lebih baik & akurat dengan konsekuensi sedikit penambahan ukuran file binary.
+
+### `V1.2.1`
 - **Patch**: Perbaikan bug login/logout Google & YouTube (whitelist seluruh domain autentikasi Google/YouTube).
 - **Fitur**: **Clear Cache & Cookies** 1-klik (`Webview::clear_all_browsing_data`) untuk paksa logout semua akun di panel *Profiles & Privacy* dan *Settings*.
 - **Fitur**: **Profile Management Terisolasi** — buat, pilih, dan hapus profil terpisah dengan warna custom & folder `data_directory` sendiri.

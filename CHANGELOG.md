@@ -2,6 +2,16 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2.2] — Upgrade Ad-Blocker ke Brave `adblock-rust` + Auto-Sync Filter List
+
+### Peningkatan Utama
+- **Ad-Blocker Engine v2 (`Brave adblock-rust`)**: Mengganti daftar blokir statis dengan engine **`adblock-rust`** milik Brave untuk pemblokiran iklan, tracker, pop-under, dan elemen kosmetik yang jauh lebih akurat dan menyeluruh.
+- **Auto-Sync Filter List Komunitas (100.000+ Aturan)**: Sinkronisasi otomatis di latar belakang tiap 24 jam (plus tombol **Sync Filter List** manual di panel AdBlock) untuk **EasyList**, **EasyPrivacy**, **ABPindo** (iklan & banner situs Indonesia), serta **Peter Lowe's Ad & Tracker List** dengan cache biner cepat (`adblock_engine.dat`).
+- **Cosmetic Filtering Dinamis & YouTube Ad-Stripper**: Menyembunyikan elemen iklan per-situs secara otomatis (Windows & Linux) serta mempercepat/melewati iklan video YouTube & menyembunyikan banner anti-adblock.
+- **Catatan Ukuran File**: Sebagai konsekuensi integrasi engine `adblock-rust` + database Public Suffix List (`psl`), ukuran file binary/installer mengalami sedikit penambahan ukuran agar kualitas pemblokiran iklan jauh lebih baik.
+
+---
+
 ## [V1.2.1] — Fix Google Logout, Clear Cache & Cookies, Profile Management, & Auto Update
 
 ### Perbaikan & Fitur Baru

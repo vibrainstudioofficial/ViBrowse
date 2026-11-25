@@ -290,6 +290,17 @@ pub fn cmd_is_site_allowlisted(state: State<'_, AppState>, host: String) -> bool
 }
 
 #[tauri::command]
+pub async fn cmd_adblock_sync_filters(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::adblock::AdblockStatusDto, String> {
+    emit_state(&app);
+    let res = state.adblock.sync_filters().await;
+    emit_state(&app);
+    res
+}
+
+#[tauri::command]
 pub fn cmd_toggle_popup_site(app: AppHandle, state: State<'_, AppState>, host: String) -> bool {
     let allowlisted = state.adblock.toggle_popup_allowlist(&host);
     emit_state(&app);

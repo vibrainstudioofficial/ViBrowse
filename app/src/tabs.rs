@@ -391,13 +391,25 @@ fn spawn_tab_webview(
         .on_page_load({
             let app = app.clone();
             let id = tab_id.to_string();
-            move |_wv, payload| {
+            move |wv, payload| {
                 if let Some(state) = app.try_state::<AppState>() {
-                    {
+                    let page_url = payload.url().to_string();
+                    let adblock_enabled = {
                         let mut inner = state.inner.lock().unwrap();
                         if let Some(tab) = inner.tab_mut(&id) {
                             tab.is_loading = matches!(payload.event(), PageLoadEvent::Started);
-                            tab.url = payload.url().to_string();
+                            tab.url = page_url.clone();
+                        }
+                        inner.settings.adblock_enabled
+                    };
+                    if let Some(css) = state.adblock.cosmetic_css_for_url(&page_url, adblock_enabled)
+                    {
+                        if let Ok(css_json) = serde_json::to_string(&css) {
+                            let js = format!(
+                                "(function(){{let s=document.getElementById('vibrowse-cosmetic-css');if(!s){{s=document.createElement('style');s.id='vibrowse-cosmetic-css';(document.head||document.documentElement).appendChild(s);}}s.textContent={};}})();",
+                                css_json
+                            );
+                            let _ = wv.eval(&js);
                         }
                     }
                     emit_state(&app);
@@ -569,19 +581,49 @@ fn attach_windows_webview_hooks(app: &AppHandle, label: &str, tab_id: &str) {
                 if !url_str.starts_with("http://") && !url_str.starts_with("https://") {
                     return Ok(());
                 }
+                let mut res_ctx = webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
+                let res_type = if args.ResourceContext(&mut res_ctx).is_ok() {
+                    match res_ctx.0 {
+                        1 => "document",
+                        2 => "stylesheet",
+                        3 => "image",
+                        4 => "media",
+                        5 => "font",
+                        6 => "script",
+                        7 => "xmlhttprequest",
+                        8 => "fetch",
+                        11 => "websocket",
+                        14 => "ping",
+                        15 => "csp_report",
+                        _ => "other",
+                    }
+                } else {
+                    "other"
+                };
+                // Never block top-level document navigation here (handled by on_navigation)
+                if res_type == "document" {
+                    return Ok(());
+                }
+                let mut method_pwstr = PWSTR::null();
+                let method_str = if req.Method(&mut method_pwstr).is_ok() && !method_pwstr.is_null()
+                {
+                    take_pwstr(method_pwstr)
+                } else {
+                    "GET".to_string()
+                };
                 if let Some(state) = app.try_state::<AppState>() {
-                    let (adblock_enabled, page_host) = {
+                    let (adblock_enabled, page_url) = {
                         let inner = state.inner.lock().unwrap();
-                        let host = inner
-                            .tab(&id)
-                            .and_then(|t| extract_host(&t.url))
-                            .unwrap_or_default();
-                        (inner.settings.adblock_enabled, host)
+                        let url = inner.tab(&id).map(|t| t.url.clone()).unwrap_or_default();
+                        (inner.settings.adblock_enabled, url)
                     };
-                    if state
-                        .adblock
-                        .should_block_subresource(&url_str, &page_host, adblock_enabled)
-                    {
+                    if state.adblock.should_block_subresource_typed(
+                        &url_str,
+                        &page_url,
+                        res_type,
+                        &method_str,
+                        adblock_enabled,
+                    ) {
                         if let Ok(wv2) = core.cast::<ICoreWebView2_2>() {
                             if let Ok(env) = wv2.Environment() {
                                 if let Ok(resp) = env.CreateWebResourceResponse(

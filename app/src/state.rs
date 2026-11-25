@@ -1,4 +1,4 @@
-use crate::adblock::AdBlocker;
+use crate::adblock::{AdBlocker, AdblockStatusDto};
 use crate::downloader::{DetectedMedia, DownloadManager};
 use crate::storage::{BrowserSettings, Storage};
 use crate::updater::UpdateInfo;
@@ -98,6 +98,7 @@ pub struct BrowserSnapshot {
     pub active_panel: Option<String>,
     pub settings: BrowserSettings,
     pub adblock_blocked_count: u64,
+    pub adblock_status: AdblockStatusDto,
     pub sleeping_tabs_count: usize,
     pub active_webviews_count: usize,
     pub estimated_ram_saved_mb: usize,
@@ -164,7 +165,7 @@ impl AppState {
                 update_progress: 0,
             }),
             storage,
-            adblock: AdBlocker::new(),
+            adblock: AdBlocker::new(app_data_dir.clone()),
             dm: DownloadManager::new(app_data_dir.clone()),
             app_data_dir,
         }
@@ -208,6 +209,7 @@ impl AppState {
             active_panel: inner.active_panel.clone(),
             settings: inner.settings.clone(),
             adblock_blocked_count: self.adblock.total_blocked(),
+            adblock_status: self.adblock.status(),
             sleeping_tabs_count,
             active_webviews_count,
             estimated_ram_saved_mb: sleeping_tabs_count * 75,

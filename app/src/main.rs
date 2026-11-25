@@ -73,6 +73,17 @@ fn main() {
             start_tab_sleeper_loop(app.handle().clone());
             tauri::async_runtime::spawn_blocking(default_browser::register_browser);
 
+            let app_ab = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if let Some(state) = app_ab.try_state::<AppState>() {
+                    if state.adblock.needs_auto_sync() {
+                        let _ = state.adblock.sync_filters().await;
+                        tabs::emit_state(&app_ab);
+                    }
+                }
+            });
+
             let app_upd = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(4)).await;
@@ -123,6 +134,7 @@ fn main() {
             commands::cmd_update_settings,
             commands::cmd_toggle_adblock_site,
             commands::cmd_is_site_allowlisted,
+            commands::cmd_adblock_sync_filters,
             commands::cmd_toggle_popup_site,
             commands::cmd_is_popup_site_allowlisted,
             commands::cmd_open_blocked_popup,

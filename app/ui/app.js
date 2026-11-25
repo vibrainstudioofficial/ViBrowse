@@ -608,6 +608,21 @@ async function renderAdblockPanel(body) {
       <div class="stat-value accent-purple">${state.adblock_blocked_count || 0}</div>
       <div class="muted">Iklan, tracker &amp; popup diblokir sesi ini</div>
     </div>
+    <div class="setting-group">
+      <strong>Engine: ${escapeHtml((state.adblock_status && state.adblock_status.engine) || 'Brave adblock-rust')}</strong>
+      <div id="adblock-sync-meta" class="muted">${(() => {
+        const st = state.adblock_status;
+        if (!st) return 'EasyList + EasyPrivacy + ABPindo';
+        if (st.is_updating) return 'Menyinkronkan EasyList, EasyPrivacy & ABPindo...';
+        const rulesTxt = (st.rules_count || 0).toLocaleString('id-ID');
+        const updatedTxt = st.last_updated_unix
+          ? new Date(st.last_updated_unix * 1000).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
+          : 'Built-in (menunggu sync)';
+        return `${st.lists_count || 1} filter list • ${rulesTxt} aturan • Update: ${updatedTxt}`;
+      })()}</div>
+      ${state.adblock_status && state.adblock_status.last_error ? `<div class="muted" style="color:#f87171;">${escapeHtml(state.adblock_status.last_error)}</div>` : ''}
+      <button id="btn-adblock-sync" class="btn btn-primary" ${(state.adblock_status && state.adblock_status.is_updating) ? 'disabled' : ''}>${(state.adblock_status && state.adblock_status.is_updating) ? 'Menyinkronkan...' : 'Sync Filter List (EasyList + ABPindo)'}</button>
+    </div>
     ${blockedPopup ? `
     <div class="setting-group">
       <strong class="btn-with-icon">${iconSvg('ban')}<span>Popup Terakhir Diblokir</span></strong>
@@ -633,6 +648,21 @@ async function renderAdblockPanel(body) {
 
   $('chk-adblock').onchange = (e) => saveSettings({ adblock_enabled: e.target.checked });
   $('chk-popup').onchange = (e) => saveSettings({ popup_blocker_enabled: e.target.checked });
+  const syncBtn = $('btn-adblock-sync');
+  if (syncBtn) {
+    syncBtn.onclick = async () => {
+      syncBtn.disabled = true;
+      syncBtn.textContent = 'Menyinkronkan...';
+      const metaEl = $('adblock-sync-meta');
+      if (metaEl) metaEl.textContent = 'Mengunduh EasyList, EasyPrivacy, ABPindo & Peter Lowe...';
+      try {
+        await invoke('cmd_adblock_sync_filters');
+      } catch (err) {
+        alert(String(err));
+      }
+      renderSidePanel();
+    };
+  }
   if (blockedPopup && tab) {
     $('btn-open-popup-once').onclick = () => invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: false });
     $('btn-allow-popup-open').onclick = () => invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: true });
@@ -698,7 +728,7 @@ function renderSettingsPanel(body) {
             ? state.available_update.has_update
               ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
               : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
-            : 'Versi terpasang: V1.2.1'
+            : 'Versi terpasang: V1.2.2'
       }</div>
       <div class="panel-row">
         <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>

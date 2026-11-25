@@ -1,9 +1,32 @@
 use crate::util::extract_host;
+use adblock::lists::{FilterSet, ParseOptions};
+use adblock::request::Request;
+use adblock::Engine;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::RwLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Built-in lightweight ad, tracker & streaming pop-under domain list (O(1) lookup).
+/// Official community filter lists synced automatically in the background.
+const FILTER_LIST_URLS: &[(&str, &str)] = &[
+    ("EasyList", "https://easylist.to/easylist/easylist.txt"),
+    ("EasyPrivacy", "https://easylist.to/easylist/easyprivacy.txt"),
+    (
+        "ABPindo",
+        "https://raw.githubusercontent.com/ABPindo/indonesianadblockrules/master/subscriptions/abpindo.txt",
+    ),
+    (
+        "PeterLowe",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext",
+    ),
+];
+
+/// Re-sync remote filter lists automatically if the cached snapshot is older than 24 hours.
+const AUTO_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
+/// Built-in lightweight ad, tracker & streaming pop-under domain list (O(1) fallback & offline baseline).
 const DEFAULT_BLOCKED_DOMAINS: &[&str] = &[
     // Major ad & analytics networks
     "doubleclick.net",
@@ -168,9 +191,13 @@ const BLOCKED_URL_PATTERNS: &[&str] = &[
     "invoke.js",
     "/atoptions",
     "histats.com/js",
+    "/api/stats/ads",
+    "/ptracking",
+    "/pagead/adview",
 ];
 
-/// Trusted auth/login/logout hosts that should never be blocked by cross-origin popup protection.
+/// Trusted auth/login/logout hosts that should never be blocked by cross-origin popup protection
+/// or subresource network blocking.
 const SAFE_POPUP_HOSTS: &[&str] = &[
     "accounts.google.com",
     "accounts.youtube.com",
@@ -188,6 +215,40 @@ const SAFE_POPUP_HOSTS: &[&str] = &[
     "oauth.telegram.org",
 ];
 
+/// Auth hosts whose subresources must never be broken by aggressive third-party rules.
+const PROTECTED_AUTH_HOSTS: &[&str] = &[
+    "accounts.google.com",
+    "accounts.youtube.com",
+    "myaccount.google.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+    "appleid.apple.com",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdblockStatusDto {
+    pub engine: String,
+    pub lists_count: usize,
+    pub rules_count: usize,
+    pub last_updated_unix: u64,
+    pub is_updating: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct AdblockCacheMeta {
+    lists_count: usize,
+    rules_count: usize,
+    last_updated_unix: u64,
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Extracts a simple registrable root domain (last two labels, e.g. `anichin.cafe`).
 fn root_domain(host: &str) -> String {
     let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
@@ -198,7 +259,55 @@ fn root_domain(host: &str) -> String {
     }
 }
 
+fn is_protected_auth_host(host: &str) -> bool {
+    PROTECTED_AUTH_HOSTS
+        .iter()
+        .any(|safe| host == *safe || host.ends_with(&format!(".{}", safe)))
+}
+
+fn build_builtin_abp_rules() -> String {
+    let mut rules = String::with_capacity(DEFAULT_BLOCKED_DOMAINS.len() * 24 + 512);
+    for domain in DEFAULT_BLOCKED_DOMAINS {
+        rules.push_str("||");
+        rules.push_str(domain);
+        rules.push_str("^\n");
+    }
+    // High-signal YouTube & streaming ad endpoints
+    rules.push_str("||youtube.com/api/stats/ads^\n");
+    rules.push_str("||youtube.com/pagead/^\n");
+    rules.push_str("||youtube.com/ptracking^\n");
+    rules.push_str("||youtube.com/get_midroll_^\n");
+    rules.push_str("||googlevideo.com/videoplayback*&oad=\n");
+    rules.push_str("||googlevideo.com/videoplayback*&ctier=L\n");
+    rules
+}
+
+fn build_engine_from_lists(extra_lists: Vec<String>) -> (Engine, usize) {
+    let mut filter_set = FilterSet::new(false);
+    let builtin = build_builtin_abp_rules();
+    let mut total_lines = builtin.lines().count();
+    filter_set.add_filter_list(builtin, ParseOptions::default());
+
+    for list_text in extra_lists {
+        total_lines += list_text
+            .lines()
+            .filter(|l| {
+                let t = l.trim();
+                !t.is_empty() && !t.starts_with('!') && !t.starts_with('[')
+            })
+            .count();
+        filter_set.add_filter_list(list_text, ParseOptions::default());
+    }
+
+    (Engine::new_with_filter_set(filter_set), total_lines)
+}
+
 pub struct AdBlocker {
+    engine: RwLock<Engine>,
+    cache_dir: PathBuf,
+    meta: RwLock<AdblockCacheMeta>,
+    is_updating: AtomicBool,
+    last_error: RwLock<Option<String>>,
     blocked_domains: HashSet<&'static str>,
     blocked_domains_json: String,
     allowlist_hosts: RwLock<HashSet<String>>,
@@ -207,18 +316,153 @@ pub struct AdBlocker {
 }
 
 impl AdBlocker {
-    pub fn new() -> Self {
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        let cache_dir = app_data_dir.join("adblock");
+        let _ = std::fs::create_dir_all(&cache_dir);
+
         let blocked_domains: HashSet<&'static str> =
             DEFAULT_BLOCKED_DOMAINS.iter().copied().collect();
         let blocked_domains_json =
             serde_json::to_string(DEFAULT_BLOCKED_DOMAINS).unwrap_or_else(|_| "[]".to_string());
+
+        let (engine, meta) = Self::load_cached_or_builtin(&cache_dir);
+
         Self {
+            engine: RwLock::new(engine),
+            cache_dir,
+            meta: RwLock::new(meta),
+            is_updating: AtomicBool::new(false),
+            last_error: RwLock::new(None),
             blocked_domains,
             blocked_domains_json,
             allowlist_hosts: RwLock::new(HashSet::new()),
             popup_allowlist_hosts: RwLock::new(HashSet::new()),
             blocked_count: AtomicU64::new(0),
         }
+    }
+
+    fn load_cached_or_builtin(cache_dir: &Path) -> (Engine, AdblockCacheMeta) {
+        let dat_path = cache_dir.join("adblock_engine.dat");
+        let meta_path = cache_dir.join("adblock_meta.json");
+
+        if let (Ok(bytes), Ok(meta_str)) =
+            (std::fs::read(&dat_path), std::fs::read_to_string(&meta_path))
+        {
+            if let Ok(meta) = serde_json::from_str::<AdblockCacheMeta>(&meta_str) {
+                let mut engine = Engine::default();
+                if engine.deserialize(&bytes).is_ok() && meta.rules_count > 0 {
+                    return (engine, meta);
+                }
+            }
+        }
+
+        let (engine, rules_count) = build_engine_from_lists(Vec::new());
+        (
+            engine,
+            AdblockCacheMeta {
+                lists_count: 1,
+                rules_count,
+                last_updated_unix: 0,
+            },
+        )
+    }
+
+    pub fn needs_auto_sync(&self) -> bool {
+        let meta = self.meta.read().unwrap();
+        if meta.last_updated_unix == 0 || meta.lists_count <= 1 {
+            return true;
+        }
+        now_unix().saturating_sub(meta.last_updated_unix) >= AUTO_SYNC_INTERVAL_SECS
+    }
+
+    pub fn status(&self) -> AdblockStatusDto {
+        let meta = self.meta.read().unwrap();
+        let last_error = self.last_error.read().unwrap().clone();
+        AdblockStatusDto {
+            engine: "Brave adblock-rust".to_string(),
+            lists_count: meta.lists_count,
+            rules_count: meta.rules_count,
+            last_updated_unix: meta.last_updated_unix,
+            is_updating: self.is_updating.load(Ordering::Relaxed),
+            last_error,
+        }
+    }
+
+    /// Downloads EasyList, EasyPrivacy, ABPindo & Peter Lowe lists, compiles them into
+    /// `adblock-rust`, persists a fast binary snapshot (`adblock_engine.dat`), and hot-swaps
+    /// the live engine in memory.
+    pub async fn sync_filters(&self) -> Result<AdblockStatusDto, String> {
+        if self.is_updating.swap(true, Ordering::SeqCst) {
+            return Ok(self.status());
+        }
+        *self.last_error.write().unwrap() = None;
+
+        let res = self.sync_filters_inner().await;
+        self.is_updating.store(false, Ordering::SeqCst);
+
+        match res {
+            Ok(status) => Ok(status),
+            Err(err) => {
+                *self.last_error.write().unwrap() = Some(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    async fn sync_filters_inner(&self) -> Result<AdblockStatusDto, String> {
+        let client = reqwest::Client::builder()
+            .user_agent("ViBrowse/1.2.2 (adblock-rust)")
+            .timeout(Duration::from_secs(25))
+            .build()
+            .map_err(|e| format!("HTTP client error: {}", e))?;
+
+        let mut downloaded: Vec<String> = Vec::new();
+        let mut loaded_count = 0usize;
+
+        for (_name, url) in FILTER_LIST_URLS {
+            if let Ok(resp) = client.get(*url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(text) = resp.text().await {
+                        if text.len() > 256 {
+                            downloaded.push(text);
+                            loaded_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if downloaded.is_empty() {
+            return Err("Gagal mengunduh filter list. Periksa koneksi internet.".to_string());
+        }
+
+        let cache_dir = self.cache_dir.clone();
+        let (new_engine, rules_count, serialized) =
+            tokio::task::spawn_blocking(move || {
+                let (engine, rules_count) = build_engine_from_lists(downloaded);
+                let serialized = engine.serialize();
+                (engine, rules_count, serialized)
+            })
+            .await
+            .map_err(|e| format!("Filter compile error: {}", e))?;
+
+        let new_meta = AdblockCacheMeta {
+            lists_count: loaded_count,
+            rules_count,
+            last_updated_unix: now_unix(),
+        };
+
+        let dat_path = cache_dir.join("adblock_engine.dat");
+        let meta_path = cache_dir.join("adblock_meta.json");
+        let _ = tokio::fs::write(&dat_path, &serialized).await;
+        if let Ok(meta_json) = serde_json::to_string_pretty(&new_meta) {
+            let _ = tokio::fs::write(&meta_path, meta_json).await;
+        }
+
+        *self.engine.write().unwrap() = new_engine;
+        *self.meta.write().unwrap() = new_meta;
+
+        Ok(self.status())
     }
 
     fn matches_blocked_host(&self, host: &str) -> bool {
@@ -247,7 +491,7 @@ impl AdBlocker {
         let Some(host) = extract_host(raw_url) else {
             return false;
         };
-        if self.is_allowlisted(&host) {
+        if self.is_allowlisted(&host) || is_protected_auth_host(&host) {
             return false;
         }
         if self.matches_blocked_host(&host) || Self::matches_url_pattern(raw_url) {
@@ -257,24 +501,91 @@ impl AdBlocker {
         false
     }
 
-    /// Checks whether a subresource request (script, iframe, xhr, image) on `page_host` should be blocked.
-    pub fn should_block_subresource(
+    /// Checks whether a subresource request (script, iframe, xhr, image, media, ping) should be
+    /// blocked using Brave's `adblock-rust` engine + fast domain/pattern fallback.
+    pub fn should_block_subresource_typed(
         &self,
         raw_url: &str,
-        page_host: &str,
+        source_url: &str,
+        resource_type: &str,
+        method: &str,
         adblock_enabled: bool,
     ) -> bool {
-        if !adblock_enabled || (!page_host.is_empty() && self.is_allowlisted(page_host)) {
+        if !adblock_enabled {
+            return false;
+        }
+        let page_host = extract_host(source_url).unwrap_or_default();
+        if !page_host.is_empty()
+            && (self.is_allowlisted(&page_host) || is_protected_auth_host(&page_host))
+        {
             return false;
         }
         let Some(req_host) = extract_host(raw_url) else {
             return false;
         };
+        if is_protected_auth_host(&req_host) {
+            return false;
+        }
+
+        // Fast-path check on built-in domains & patterns
         if self.matches_blocked_host(&req_host) || Self::matches_url_pattern(raw_url) {
             self.blocked_count.fetch_add(1, Ordering::Relaxed);
             return true;
         }
+
+        // Full Brave adblock-rust check (EasyList + EasyPrivacy + ABPindo + Peter Lowe)
+        let effective_source = if source_url.starts_with("http://")
+            || source_url.starts_with("https://")
+        {
+            source_url
+        } else {
+            raw_url
+        };
+        if let Ok(req) = Request::new(raw_url, effective_source, resource_type, method) {
+            let matched = self
+                .engine
+                .read()
+                .unwrap()
+                .check_network_request(&req)
+                .should_block();
+            if matched {
+                self.blocked_count.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+        }
         false
+    }
+
+    /// Returns site-specific cosmetic CSS rules from `adblock-rust` for `page_url`
+    /// (works on both Windows WebView2 and Linux WebKitGTK).
+    pub fn cosmetic_css_for_url(&self, page_url: &str, adblock_enabled: bool) -> Option<String> {
+        if !adblock_enabled {
+            return None;
+        }
+        if !page_url.starts_with("http://") && !page_url.starts_with("https://") {
+            return None;
+        }
+        let host = extract_host(page_url)?;
+        if self.is_allowlisted(&host) || is_protected_auth_host(&host) {
+            return None;
+        }
+        let resources = self.engine.read().unwrap().url_cosmetic_resources(page_url);
+        if resources.hide_selectors.is_empty() {
+            return None;
+        }
+        let selectors: Vec<&str> = resources
+            .hide_selectors
+            .iter()
+            .take(450)
+            .map(|s| s.as_str())
+            .collect();
+        if selectors.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "{} {{ display: none !important; visibility: hidden !important; }}",
+            selectors.join(", ")
+        ))
     }
 
     /// Decides whether a new-tab/popup request from `source_url` to `target_url` should be blocked.
@@ -369,7 +680,7 @@ fn toggle_set_entry(lock: &RwLock<HashSet<String>>, host: &str) -> bool {
 }
 
 /// Generates the lightweight initialization script injected into every content tab webview
-/// (AdBlock + Smart Popup Blocker + IDM-style Floating Video Downloader button).
+/// (AdBlock + YouTube Ad-Stripper + Smart Popup Blocker + IDM-style Floating Video Downloader).
 pub fn build_tab_init_script(
     adblock_enabled: bool,
     popup_blocker_enabled: bool,
@@ -434,7 +745,18 @@ pub fn build_tab_init_script(
       div[id^="div-gpt-ad"],
       .ad-container, .ad-banner, .ad-slot, .sponsored-ad,
       .floating-ads, .sticky-ads, .banner-ads, .iklan, .ads-box,
-      #taboola-below-article-thumbnails, .OUTBRAIN {{
+      #taboola-below-article-thumbnails, .OUTBRAIN,
+      ytd-ad-slot-renderer,
+      ytd-in-feed-ad-layout-renderer,
+      ytd-banner-promo-renderer,
+      ytd-promoted-sparkles-web-renderer,
+      ytd-display-ad-renderer,
+      ytd-companion-slot-renderer,
+      ytd-action-companion-ad-renderer,
+      ytd-player-legacy-desktop-watch-ads-renderer,
+      ytd-enforcement-message-view-model,
+      #masthead-ad, #player-ads,
+      .ytp-ad-module, .ytp-ad-overlay-container, .ytp-ad-text-overlay {{
         display: none !important;
         visibility: hidden !important;
         height: 0 !important;
@@ -443,6 +765,40 @@ pub fn build_tab_init_script(
       }}
     `;
     (document.head || document.documentElement).appendChild(style);
+
+    // ---- YOUTUBE AD-STRIPPER & AUTO-SKIPPER ----
+    if (/(^|\.)youtube\.com$/i.test(location.hostname)) {{
+      const skipYouTubeAds = () => {{
+        const player = document.querySelector('#movie_player, .html5-video-player');
+        const isAd = player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
+        const skipBtns = document.querySelectorAll(
+          '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, button.ytp-ad-skip-button-modern, .ytp-ad-overlay-close-button'
+        );
+        skipBtns.forEach((btn) => {{
+          try {{ btn.click(); }} catch (_) {{}}
+        }});
+        if (isAd) {{
+          const video = player.querySelector('video');
+          if (video) {{
+            video.muted = true;
+            if (isFinite(video.duration) && video.duration > 0 && video.currentTime < video.duration - 0.1) {{
+              try {{ video.currentTime = video.duration; }} catch (_) {{}}
+            }}
+            try {{ video.playbackRate = 16; }} catch (_) {{}}
+          }}
+        }}
+        // Remove anti-adblock popup dialogs if any
+        const enforcement = document.querySelector('ytd-enforcement-message-view-model');
+        if (enforcement) {{
+          const dialog = enforcement.closest('tp-yt-paper-dialog');
+          if (dialog) dialog.remove();
+          else enforcement.remove();
+          const v = document.querySelector('video.html5-main-video');
+          if (v && v.paused) {{ try {{ v.play(); }} catch (_) {{}} }}
+        }}
+      }};
+      setInterval(skipYouTubeAds, 250);
+    }}
   }}
 
   if (POPUP_BLOCK_ON) {{
