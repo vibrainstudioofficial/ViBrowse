@@ -199,30 +199,66 @@ pub fn layout_webviews(app: &AppHandle) {
     }
 }
 
-fn handle_vibrowse_dl_url(app: &AppHandle, url: &Url) {
+fn handle_vibrowse_dl_url(app: &AppHandle, tab_id: &str, url: &Url) {
+    let host = url.host_str().unwrap_or("");
     let mut target_url = String::new();
     let mut quality = "best".to_string();
+    let mut title = String::new();
     for (k, v) in url.query_pairs() {
-        if k == "url" {
-            target_url = v.into_owned();
-        } else if k == "quality" {
-            quality = v.into_owned();
+        match k.as_ref() {
+            "url" => target_url = v.into_owned(),
+            "quality" => quality = v.into_owned(),
+            "title" => title = v.into_owned(),
+            _ => {}
         }
     }
-    if !target_url.is_empty() {
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Some(state) = app.try_state::<AppState>() {
-                let _ = state
-                    .dm
-                    .start_video_download(app.clone(), target_url, quality)
-                    .await;
-                state.inner.lock().unwrap().active_panel = Some("downloads".to_string());
-                layout_webviews(&app);
-                emit_state(&app);
-            }
-        });
+    if target_url.is_empty() {
+        return;
     }
+    if host == "sync" {
+        if let Some(state) = app.try_state::<AppState>() {
+            {
+                let mut inner = state.inner.lock().unwrap();
+                if let Some(tab) = inner.tab_mut(tab_id) {
+                    tab.url = target_url.clone();
+                    if !title.trim().is_empty() {
+                        tab.title = title.clone();
+                    }
+                    if !tab.detected_media.iter().any(|m| m.url == target_url) {
+                        tab.detected_media.insert(
+                            0,
+                            DetectedMedia {
+                                url: target_url,
+                                filename: if title.trim().is_empty() {
+                                    tab.title.clone()
+                                } else {
+                                    title
+                                },
+                                kind: "platform".to_string(),
+                            },
+                        );
+                        if tab.detected_media.len() > 20 {
+                            tab.detected_media.truncate(20);
+                        }
+                    }
+                }
+            }
+            emit_state(app);
+        }
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(state) = app.try_state::<AppState>() {
+            let _ = state
+                .dm
+                .start_video_download(app.clone(), target_url, quality)
+                .await;
+            state.inner.lock().unwrap().active_panel = Some("downloads".to_string());
+            layout_webviews(&app);
+            emit_state(&app);
+        }
+    });
 }
 
 fn spawn_tab_webview(
@@ -269,7 +305,7 @@ fn spawn_tab_webview(
             move |nav_url| {
                 let url_s = nav_url.as_str();
                 if url_s.starts_with("vibrowse-dl://") {
-                    handle_vibrowse_dl_url(&app, nav_url);
+                    handle_vibrowse_dl_url(&app, &id, nav_url);
                     return false;
                 }
                 if url_s.starts_with("magnet:") {
@@ -412,7 +448,7 @@ fn spawn_tab_webview(
             move |new_url, _features| {
                 let url_s = new_url.to_string();
                 if url_s.starts_with("vibrowse-dl://") {
-                    handle_vibrowse_dl_url(&app, &new_url);
+                    handle_vibrowse_dl_url(&app, &id, &new_url);
                     return NewWindowResponse::Deny;
                 }
                 if let Some(state) = app.try_state::<AppState>() {

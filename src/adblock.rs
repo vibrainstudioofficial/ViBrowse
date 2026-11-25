@@ -474,6 +474,7 @@ pub fn build_tab_init_script(
     let mainBtn = null;
     let labelEl = null;
     let dismissedHref = null;
+    let lastSyncedHref = null;
     let activeVideo = null;
     let menuOpen = false;
 
@@ -567,17 +568,29 @@ pub fn build_tab_init_script(
           .vb-close:hover {{ color: #fff; background: rgba(239, 68, 68, 0.35); }}
           .vb-menu {{
             position: absolute;
-            top: calc(100% + 5px);
+            bottom: calc(100% + 6px);
             right: 0;
-            min-width: 158px;
+            min-width: 220px;
+            max-width: 290px;
             background: rgba(15, 23, 42, 0.97);
-            border: 1px solid rgba(148, 163, 184, 0.25);
-            border-radius: 9px;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
-            padding: 4px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 10px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+            padding: 6px;
             display: none;
             flex-direction: column;
             gap: 2px;
+          }}
+          .vb-menu-title {{
+            font-size: 11px;
+            font-weight: 600;
+            color: #93c5fd;
+            padding: 4px 8px 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 3px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
           }}
           .vb-opt {{
             border: none;
@@ -599,13 +612,13 @@ pub fn build_tab_init_script(
         </style>
         <div class="vb-wrap" id="vb-wrap">
           <div class="vb-pill">
-            <button class="vb-btn primary" id="vb-dl" title="Unduh video dengan ViBrowse Download Manager">
+            <button class="vb-btn primary" id="vb-dl" title="Unduh video ini dengan ViBrowse Download Manager">
               <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               <span id="vb-lbl">Download Video</span>
             </button>
             <div class="vb-sep"></div>
             <button class="vb-btn" id="vb-caret" title="Pilih kualitas video">
-              <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+              <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
             </button>
             <div class="vb-sep"></div>
             <button class="vb-btn vb-close" id="vb-close" title="Sembunyikan tombol ini">
@@ -613,6 +626,7 @@ pub fn build_tab_init_script(
             </button>
           </div>
           <div class="vb-menu" id="vb-menu">
+            <div class="vb-menu-title" id="vb-title">Video Terdeteksi</div>
             <button class="vb-opt" data-q="best"><span>Best Quality</span><span class="vb-tag">MP4</span></button>
             <button class="vb-opt" data-q="1080p"><span>Full HD 1080p</span><span class="vb-tag">MP4</span></button>
             <button class="vb-opt" data-q="720p"><span>HD 720p</span><span class="vb-tag">MP4</span></button>
@@ -626,6 +640,7 @@ pub fn build_tab_init_script(
       menu = shadow.getElementById('vb-menu');
       mainBtn = shadow.getElementById('vb-dl');
       labelEl = shadow.getElementById('vb-lbl');
+      const titleEl = shadow.getElementById('vb-title');
 
       mainBtn.addEventListener('click', (e) => {{
         e.stopPropagation();
@@ -633,6 +648,9 @@ pub fn build_tab_init_script(
       }});
       shadow.getElementById('vb-caret').addEventListener('click', (e) => {{
         e.stopPropagation();
+        if (titleEl) {{
+          titleEl.textContent = (document.title || 'Video Terdeteksi').replace(/\s*-\s*YouTube$/i, '');
+        }}
         menuOpen = !menuOpen;
         menu.style.display = menuOpen ? 'flex' : 'none';
       }});
@@ -678,6 +696,12 @@ pub fn build_tab_init_script(
     }}
 
     function updatePosition() {{
+      if (isVideoPlatformUrl(location.href) && location.href !== lastSyncedHref) {{
+        lastSyncedHref = location.href;
+        const cleanTitle = (document.title || 'Video').replace(/\s*-\s*YouTube$/i, '');
+        const syncUrl = 'vibrowse-dl://sync?url=' + encodeURIComponent(location.href) + '&title=' + encodeURIComponent(cleanTitle);
+        if (ORIG_WINDOW_OPEN) ORIG_WINDOW_OPEN(syncUrl, '_blank');
+      }}
       if (document.fullscreenElement || dismissedHref === location.href) {{
         if (wrap) wrap.style.display = 'none';
         return;
@@ -690,8 +714,9 @@ pub fn build_tab_init_script(
       }}
       ensureUi();
       const r = video.getBoundingClientRect();
-      const top = Math.max(8, Math.min(window.innerHeight - 48, r.top + 10));
-      const left = Math.max(8, Math.min(window.innerWidth - 196, r.right - 192));
+      // Anchor cleanly at bottom-right above the player controls (never collides with top navbar)
+      const top = Math.max(76, Math.min(window.innerHeight - 54, r.bottom - 94));
+      const left = Math.max(12, Math.min(window.innerWidth - 208, r.right - 204));
       wrap.style.top = top + 'px';
       wrap.style.left = left + 'px';
       wrap.style.display = 'flex';

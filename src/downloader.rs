@@ -443,6 +443,7 @@ impl DownloadManager {
             let mut cmd = Command::new(&ytdlp_path);
             let mut args: Vec<String> = vec![
                 "--no-playlist".into(),
+                "--windows-filenames".into(),
                 "--newline".into(),
                 "--progress".into(),
                 "--retries".into(),
@@ -458,6 +459,21 @@ impl DownloadManager {
                 "-f".into(),
                 format_str,
             ];
+            // Enable available JS runtime for yt-dlp 2026+ YouTube EJS extraction,
+            // with android_vr fallback when no JS runtime is installed.
+            if Self::resolve_binary_in_path("deno").is_some() {
+                args.push("--js-runtimes".into());
+                args.push("deno".into());
+            } else if Self::resolve_binary_in_path("node").is_some() {
+                args.push("--js-runtimes".into());
+                args.push("node".into());
+            } else if Self::resolve_binary_in_path("bun").is_some() {
+                args.push("--js-runtimes".into());
+                args.push("bun".into());
+            } else {
+                args.push("--extractor-args".into());
+                args.push("youtube:player_client=android_vr,web".into());
+            }
             if has_ffmpeg && quality != "audio" {
                 args.push("--merge-output-format".into());
                 args.push("mp4".into());
@@ -465,6 +481,8 @@ impl DownloadManager {
             args.push(url.clone());
 
             cmd.args(&args)
+                .env("PYTHONUTF8", "1")
+                .env("PYTHONIOENCODING", "utf-8")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
 

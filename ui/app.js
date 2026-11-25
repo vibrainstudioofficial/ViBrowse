@@ -500,12 +500,21 @@ async function renderDownloadsPanel(body) {
           <div class="panel-item-title btn-with-icon">${iconSvg('video', 'ui-icon-xs')}<span>${escapeHtml(media.filename)}</span></div>
           <div class="panel-item-sub">${escapeHtml(media.kind.toUpperCase())} • ${escapeHtml(media.url)}</div>
         </div>
+        ${isStream ? `
+          <select class="setting-select" style="font-size:11px;padding:4px 6px;" title="Pilih kualitas">
+            <option value="best">Best</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+            <option value="480p">480p</option>
+            <option value="audio">Audio</option>
+          </select>` : ''}
         <button class="btn btn-primary btn-with-icon" title="Download">${iconSvg('download', 'ui-icon-xs')}</button>
       `;
       el.querySelector('button').onclick = async () => {
         try {
           if (isStream) {
-            await invoke('cmd_dm_start_video', { url: media.url, quality: 'best' });
+            const qSel = el.querySelector('select');
+            await invoke('cmd_dm_start_video', { url: media.url, quality: qSel ? qSel.value : 'best' });
           } else {
             await invoke('cmd_dm_start_http', { url: media.url, connections: 8, filename: media.filename });
           }
