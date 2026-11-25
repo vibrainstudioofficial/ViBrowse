@@ -484,6 +484,42 @@ pub fn build_tab_init_script(
 
     function resolveTargetUrl(video) {{
       const href = location.href;
+      const host = location.hostname.toLowerCase();
+
+      // 1. Twitter / X: on timeline/home feeds, extract the tweet's exact /status/<id> link
+      if (host.includes('x.com') || host.includes('twitter.com')) {{
+        if (/\/status\/\d+/i.test(href)) {{
+          return href.split('?')[0];
+        }}
+        if (video) {{
+          const art = video.closest('article');
+          if (art) {{
+            const timeLink = art.querySelector('a[href*="/status/"] time');
+            const a = timeLink ? timeLink.closest('a') : art.querySelector('a[href*="/status/"]');
+            if (a && a.href) return a.href.split('?')[0];
+          }}
+        }}
+      }}
+
+      // 2. YouTube: normalize /watch?v=ID (strip radio/mix list params) or extract preview link
+      if (host.includes('youtube.com') || host === 'youtu.be') {{
+        try {{
+          const u = new URL(href);
+          const vid = u.searchParams.get('v');
+          if (u.pathname === '/watch' && vid) {{
+            return 'https://www.youtube.com/watch?v=' + encodeURIComponent(vid);
+          }}
+          if (u.pathname.startsWith('/shorts/')) {{
+            return u.origin + u.pathname;
+          }}
+        }} catch (_) {{}}
+        if (video) {{
+          const card = video.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-reel-video-renderer');
+          const a = card ? card.querySelector('a[href*="/watch?v="], a[href*="/shorts/"]') : null;
+          if (a && a.href) return a.href;
+        }}
+      }}
+
       if (isVideoPlatformUrl(href)) return href;
       const src = video ? (video.currentSrc || video.src || '') : '';
       if (src && /^https?:\/\//i.test(src)) return src;
@@ -568,7 +604,7 @@ pub fn build_tab_init_script(
           .vb-close:hover {{ color: #fff; background: rgba(239, 68, 68, 0.35); }}
           .vb-menu {{
             position: absolute;
-            bottom: calc(100% + 6px);
+            top: calc(100% + 5px);
             right: 0;
             min-width: 220px;
             max-width: 290px;
@@ -618,7 +654,7 @@ pub fn build_tab_init_script(
             </button>
             <div class="vb-sep"></div>
             <button class="vb-btn" id="vb-caret" title="Pilih kualitas video">
-              <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+              <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
             <div class="vb-sep"></div>
             <button class="vb-btn vb-close" id="vb-close" title="Sembunyikan tombol ini">
@@ -656,7 +692,7 @@ pub fn build_tab_init_script(
       }});
       shadow.getElementById('vb-close').addEventListener('click', (e) => {{
         e.stopPropagation();
-        dismissedHref = location.href;
+        dismissedHref = resolveTargetUrl(activeVideo) || location.href;
         wrap.style.display = 'none';
         menuOpen = false;
         menu.style.display = 'none';
@@ -702,7 +738,7 @@ pub fn build_tab_init_script(
         const syncUrl = 'vibrowse-dl://sync?url=' + encodeURIComponent(location.href) + '&title=' + encodeURIComponent(cleanTitle);
         if (ORIG_WINDOW_OPEN) ORIG_WINDOW_OPEN(syncUrl, '_blank');
       }}
-      if (document.fullscreenElement || dismissedHref === location.href) {{
+      if (document.fullscreenElement) {{
         if (wrap) wrap.style.display = 'none';
         return;
       }}
@@ -712,11 +748,16 @@ pub fn build_tab_init_script(
         if (wrap) wrap.style.display = 'none';
         return;
       }}
+      const key = resolveTargetUrl(video) || location.href;
+      if (dismissedHref === key) {{
+        if (wrap) wrap.style.display = 'none';
+        return;
+      }}
       ensureUi();
       const r = video.getBoundingClientRect();
-      // Anchor cleanly at bottom-right above the player controls (never collides with top navbar)
-      const top = Math.max(76, Math.min(window.innerHeight - 54, r.bottom - 94));
-      const left = Math.max(12, Math.min(window.innerWidth - 208, r.right - 204));
+      // Anchor at top-right corner of the video player (with close button to hide anytime)
+      const top = Math.max(8, Math.min(window.innerHeight - 54, r.top + 8));
+      const left = Math.max(8, Math.min(window.innerWidth - 208, r.right - 204));
       wrap.style.top = top + 'px';
       wrap.style.left = left + 'px';
       wrap.style.display = 'flex';

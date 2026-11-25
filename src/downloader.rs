@@ -331,13 +331,14 @@ impl DownloadManager {
         Ok(id)
     }
 
-    /// 2. YouTube & 1000+ Platforms Video Downloader (`yt-dlp`, auto-installs if missing)
+    /// 2. YouTube, X/Twitter, & 1000+ Platforms Video Downloader (`yt-dlp`, auto-installs if missing)
     pub async fn start_video_download(
         &self,
         app: AppHandle,
         url: String,
         quality: String,
     ) -> Result<String, String> {
+        let url = normalize_video_url(&url);
         // Direct MP4/WebM/MKV links download faster via 8-connection IDM HTTP engine.
         let clean_path = url.to_lowercase();
         let path_no_q = clean_path.split('?').next().unwrap_or("");
@@ -440,173 +441,214 @@ impl DownloadManager {
                 }
             };
 
-            let mut cmd = Command::new(&ytdlp_path);
-            let mut args: Vec<String> = vec![
-                "--no-playlist".into(),
-                "--windows-filenames".into(),
-                "--newline".into(),
-                "--progress".into(),
-                "--retries".into(),
-                "3".into(),
-                "--fragment-retries".into(),
-                "3".into(),
-                "--concurrent-fragments".into(),
-                "4".into(),
-                "-P".into(),
-                download_dir.to_string_lossy().to_string(),
-                "-o".into(),
-                "%(title).120s.%(ext)s".into(),
-                "-f".into(),
-                format_str,
-            ];
-            // Enable available JS runtime for yt-dlp 2026+ YouTube EJS extraction,
-            // with android_vr fallback when no JS runtime is installed.
-            if Self::resolve_binary_in_path("deno").is_some() {
-                args.push("--js-runtimes".into());
-                args.push("deno".into());
-            } else if Self::resolve_binary_in_path("node").is_some() {
-                args.push("--js-runtimes".into());
-                args.push("node".into());
-            } else if Self::resolve_binary_in_path("bun").is_some() {
-                args.push("--js-runtimes".into());
-                args.push("bun".into());
-            } else {
-                args.push("--extractor-args".into());
-                args.push("youtube:player_client=android_vr,web".into());
-            }
-            if has_ffmpeg && quality != "audio" {
-                args.push("--merge-output-format".into());
-                args.push("mp4".into());
-            }
-            args.push(url.clone());
+            // Two-pass execution: Pass 1 uses requested quality + detected JS runtime (EJS);
+            // if Pass 1 fails, Pass 2 automatically retries with universal fallback clients/format.
+            let mut last_error = String::new();
+            let mut succeeded = false;
 
-            cmd.args(&args)
-                .env("PYTHONUTF8", "1")
-                .env("PYTHONIOENCODING", "utf-8")
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-
-            let mut child = match cmd.spawn() {
-                Ok(c) => c,
-                Err(e) => {
-                    update_task(&tasks, &task_id, |t| {
-                        t.status = TaskStatus::Failed;
-                        t.error = Some(format!("Gagal menjalankan yt-dlp: {}", e));
-                    });
-                    Self::emit_dm(&app);
-                    return;
+            for attempt in 0..2 {
+                if canceled.load(Ordering::Relaxed) {
+                    break;
                 }
-            };
+                let mut args: Vec<String> = vec![
+                    "--no-playlist".into(),
+                    "--windows-filenames".into(),
+                    "--no-check-certificates".into(),
+                    "--newline".into(),
+                    "--progress".into(),
+                    "--retries".into(),
+                    "3".into(),
+                    "--fragment-retries".into(),
+                    "3".into(),
+                    "--concurrent-fragments".into(),
+                    "4".into(),
+                    "-P".into(),
+                    download_dir.to_string_lossy().to_string(),
+                    "-o".into(),
+                    "%(title).120s.%(ext)s".into(),
+                    "-f".into(),
+                    if attempt == 0 {
+                        format_str.clone()
+                    } else {
+                        "best/b".into()
+                    },
+                ];
+                if attempt == 0 {
+                    if Self::resolve_binary_in_path("deno").is_some() {
+                        args.extend([
+                            "--js-runtimes".into(),
+                            "deno".into(),
+                            "--remote-components".into(),
+                            "ejs:github".into(),
+                        ]);
+                    } else if Self::resolve_binary_in_path("node").is_some() {
+                        args.extend([
+                            "--js-runtimes".into(),
+                            "node".into(),
+                            "--remote-components".into(),
+                            "ejs:github".into(),
+                        ]);
+                    } else if Self::resolve_binary_in_path("bun").is_some() {
+                        args.extend([
+                            "--js-runtimes".into(),
+                            "bun".into(),
+                            "--remote-components".into(),
+                            "ejs:github".into(),
+                        ]);
+                    } else {
+                        args.extend([
+                            "--extractor-args".into(),
+                            "youtube:player_client=android_vr,ios,web".into(),
+                        ]);
+                    }
+                } else {
+                    args.extend([
+                        "--extractor-args".into(),
+                        "youtube:player_client=android_vr,ios,tv_simply,web".into(),
+                    ]);
+                }
+                if has_ffmpeg && quality != "audio" && attempt == 0 {
+                    args.push("--merge-output-format".into());
+                    args.push("mp4".into());
+                }
+                args.push(url.clone());
 
-            // Drain stderr concurrently so the pipe never deadlocks and we capture real errors.
-            let stderr_handle = child.stderr.take().map(|err_io| {
-                tauri::async_runtime::spawn(async move {
-                    let mut reader = BufReader::new(err_io).lines();
-                    let mut last_err = String::new();
-                    while let Ok(Some(line)) = reader.next_line().await {
-                        let t = line.trim();
-                        if !t.is_empty() && (t.starts_with("ERROR:") || last_err.is_empty()) {
-                            last_err = t.to_string();
+                let mut cmd = Command::new(&ytdlp_path);
+                cmd.args(&args)
+                    .env("PYTHONUTF8", "1")
+                    .env("PYTHONIOENCODING", "utf-8")
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+
+                #[cfg(target_os = "windows")]
+                cmd.creation_flags(CREATE_NO_WINDOW);
+
+                let mut child = match cmd.spawn() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        last_error = format!("Gagal menjalankan yt-dlp: {}", e);
+                        break;
+                    }
+                };
+
+                let stderr_handle = child.stderr.take().map(|err_io| {
+                    tauri::async_runtime::spawn(async move {
+                        let mut reader = BufReader::new(err_io).lines();
+                        let mut last_err = String::new();
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let t = line.trim();
+                            if !t.is_empty() && (t.starts_with("ERROR:") || last_err.is_empty()) {
+                                last_err = t.to_string();
+                            }
                         }
-                    }
-                    last_err
-                })
-            });
+                        last_err
+                    })
+                });
 
-            if let Some(out) = child.stdout.take() {
-                let mut reader = BufReader::new(out).lines();
-                let mut last_emit = Instant::now();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    if canceled.load(Ordering::Relaxed) {
-                        let _ = child.kill().await;
-                        update_task(&tasks, &task_id, |t| {
-                            t.status = TaskStatus::Canceled;
-                            t.speed_bps = 0;
-                        });
-                        Self::emit_dm(&app);
-                        return;
-                    }
-                    let trimmed = line.trim();
-                    let dest_opt = trimmed
-                        .strip_prefix("[download] Destination: ")
-                        .map(|s| s.trim())
-                        .or_else(|| {
-                            trimmed
-                                .strip_prefix("[Merger] Merging formats into \"")
-                                .and_then(|s| s.strip_suffix('"'))
-                        })
-                        .or_else(|| {
-                            trimmed
-                                .strip_prefix("[download] ")
-                                .and_then(|s| s.strip_suffix(" has already been downloaded"))
-                        });
-                    if let Some(dest_str) = dest_opt {
-                        let fname = PathBuf::from(dest_str)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("video.mp4")
-                            .to_string();
-                        update_task(&tasks, &task_id, |t| {
-                            t.filename = fname;
-                            t.save_path = dest_str.to_string();
-                        });
-                        Self::emit_dm(&app);
-                    } else if trimmed.starts_with("[download]") && trimmed.contains('%') {
-                        if let Some((pct, total_b, speed_b, eta_s)) = parse_ytdlp_progress(trimmed)
-                        {
+                if let Some(out) = child.stdout.take() {
+                    let mut reader = BufReader::new(out).lines();
+                    let mut last_emit = Instant::now();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        if canceled.load(Ordering::Relaxed) {
+                            let _ = child.kill().await;
                             update_task(&tasks, &task_id, |t| {
-                                if total_b > 0 {
-                                    t.total_bytes = total_b;
-                                    t.downloaded_bytes = ((total_b as f64) * pct / 100.0) as u64;
-                                } else {
-                                    t.total_bytes = 100;
-                                    t.downloaded_bytes = pct as u64;
-                                }
-                                t.speed_bps = speed_b;
-                                t.eta_secs = eta_s;
+                                t.status = TaskStatus::Canceled;
+                                t.speed_bps = 0;
                             });
-                            if last_emit.elapsed() >= Duration::from_millis(400) {
-                                last_emit = Instant::now();
-                                Self::emit_dm(&app);
+                            Self::emit_dm(&app);
+                            return;
+                        }
+                        let trimmed = line.trim();
+                        let dest_opt = trimmed
+                            .strip_prefix("[download] Destination: ")
+                            .map(|s| s.trim())
+                            .or_else(|| {
+                                trimmed
+                                    .strip_prefix("[Merger] Merging formats into \"")
+                                    .and_then(|s| s.strip_suffix('"'))
+                            })
+                            .or_else(|| {
+                                trimmed
+                                    .strip_prefix("[download] ")
+                                    .and_then(|s| s.strip_suffix(" has already been downloaded"))
+                            });
+                        if let Some(dest_str) = dest_opt {
+                            let fname = PathBuf::from(dest_str)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("video.mp4")
+                                .to_string();
+                            update_task(&tasks, &task_id, |t| {
+                                t.filename = fname;
+                                t.save_path = dest_str.to_string();
+                            });
+                            Self::emit_dm(&app);
+                        } else if trimmed.starts_with("[download]") && trimmed.contains('%') {
+                            if let Some((pct, total_b, speed_b, eta_s)) =
+                                parse_ytdlp_progress(trimmed)
+                            {
+                                update_task(&tasks, &task_id, |t| {
+                                    if total_b > 0 {
+                                        t.total_bytes = total_b;
+                                        t.downloaded_bytes =
+                                            ((total_b as f64) * pct / 100.0) as u64;
+                                    } else {
+                                        t.total_bytes = 100;
+                                        t.downloaded_bytes = pct as u64;
+                                    }
+                                    t.speed_bps = speed_b;
+                                    t.eta_secs = eta_s;
+                                });
+                                if last_emit.elapsed() >= Duration::from_millis(400) {
+                                    last_emit = Instant::now();
+                                    Self::emit_dm(&app);
+                                }
                             }
                         }
                     }
                 }
+
+                let err_msg = match stderr_handle {
+                    Some(h) => h.await.unwrap_or_default(),
+                    None => String::new(),
+                };
+
+                match child.wait().await {
+                    Ok(s) if s.success() => {
+                        succeeded = true;
+                        break;
+                    }
+                    Ok(s) => {
+                        last_error = if !err_msg.is_empty() {
+                            err_msg
+                        } else {
+                            format!("yt-dlp berhenti dengan kode {}", s)
+                        };
+                    }
+                    Err(e) => {
+                        last_error = e.to_string();
+                    }
+                }
             }
 
-            let err_msg = match stderr_handle {
-                Some(h) => h.await.unwrap_or_default(),
-                None => String::new(),
-            };
-
-            match child.wait().await {
-                Ok(s) if s.success() => update_task(&tasks, &task_id, |t| {
+            if succeeded {
+                update_task(&tasks, &task_id, |t| {
                     t.status = TaskStatus::Completed;
                     if t.total_bytes > 0 {
                         t.downloaded_bytes = t.total_bytes;
                     }
                     t.speed_bps = 0;
                     t.eta_secs = 0;
-                }),
-                Ok(s) => update_task(&tasks, &task_id, |t| {
+                    t.error = None;
+                });
+            } else if !canceled.load(Ordering::Relaxed) {
+                update_task(&tasks, &task_id, |t| {
                     if t.status != TaskStatus::Canceled {
                         t.status = TaskStatus::Failed;
-                        t.error = Some(if !err_msg.is_empty() {
-                            err_msg
-                        } else {
-                            format!("yt-dlp berhenti dengan kode {}", s)
-                        });
+                        t.error = Some(last_error);
                         t.speed_bps = 0;
                     }
-                }),
-                Err(e) => update_task(&tasks, &task_id, |t| {
-                    t.status = TaskStatus::Failed;
-                    t.error = Some(e.to_string());
-                    t.speed_bps = 0;
-                }),
+                });
             }
             Self::emit_dm(&app);
         });
@@ -1282,4 +1324,24 @@ pub fn is_video_platform_url(raw_url: &str) -> bool {
     ]
     .iter()
     .any(|p| lower.contains(p))
+}
+
+/// Strips noisy radio/playlist/tracking parameters from YouTube & X/Twitter URLs
+/// so yt-dlp always targets the exact single video cleanly.
+fn normalize_video_url(raw_url: &str) -> String {
+    let Ok(parsed) = reqwest::Url::parse(raw_url.trim()) else {
+        return raw_url.trim().to_string();
+    };
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+    if host.contains("youtube.com") && parsed.path() == "/watch" {
+        if let Some((_, vid)) = parsed.query_pairs().find(|(k, _)| k == "v") {
+            return format!("https://www.youtube.com/watch?v={}", vid);
+        }
+    }
+    if (host.contains("x.com") || host.contains("twitter.com"))
+        && parsed.path().contains("/status/")
+    {
+        return format!("https://x.com{}", parsed.path());
+    }
+    raw_url.trim().to_string()
 }
