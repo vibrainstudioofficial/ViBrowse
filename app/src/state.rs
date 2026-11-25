@@ -1,6 +1,7 @@
 use crate::adblock::AdBlocker;
 use crate::downloader::{DetectedMedia, DownloadManager};
 use crate::storage::{BrowserSettings, Storage};
+use crate::updater::UpdateInfo;
 use crate::util::extract_host;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -103,6 +104,10 @@ pub struct BrowserSnapshot {
     pub is_fullscreen: bool,
     pub is_default_browser: bool,
     pub show_default_banner: bool,
+    pub available_update: Option<UpdateInfo>,
+    pub show_update_banner: bool,
+    pub update_downloading: bool,
+    pub update_progress: u8,
 }
 
 pub struct InnerState {
@@ -114,6 +119,10 @@ pub struct InnerState {
     pub is_fullscreen: bool,
     pub is_default_browser: bool,
     pub show_default_banner: bool,
+    pub available_update: Option<UpdateInfo>,
+    pub show_update_banner: bool,
+    pub update_downloading: bool,
+    pub update_progress: u8,
 }
 
 impl InnerState {
@@ -148,6 +157,10 @@ impl AppState {
                 is_fullscreen: false,
                 is_default_browser: is_default,
                 show_default_banner: show_banner,
+                available_update: None,
+                show_update_banner: false,
+                update_downloading: false,
+                update_progress: 0,
             }),
             storage,
             adblock: AdBlocker::new(),
@@ -181,6 +194,10 @@ impl AppState {
             is_fullscreen: inner.is_fullscreen,
             is_default_browser: inner.is_default_browser,
             show_default_banner: inner.show_default_banner,
+            available_update: inner.available_update.clone(),
+            show_update_banner: inner.show_update_banner,
+            update_downloading: inner.update_downloading,
+            update_progress: inner.update_progress,
         }
     }
 
@@ -191,6 +208,9 @@ impl AppState {
             h += BOOKMARKS_BAR_HEIGHT;
         }
         if inner.show_default_banner {
+            h += DEFAULT_BANNER_HEIGHT;
+        }
+        if inner.show_update_banner {
             h += DEFAULT_BANNER_HEIGHT;
         }
         h

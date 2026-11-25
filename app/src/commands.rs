@@ -481,3 +481,55 @@ pub fn cmd_recheck_default_browser(app: AppHandle, state: State<'_, AppState>) -
     emit_state(&app);
     is_def
 }
+
+#[tauri::command]
+pub async fn cmd_check_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::updater::UpdateInfo, String> {
+    let info = crate::updater::check_for_update().await?;
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.show_update_banner = info.has_update;
+        inner.available_update = Some(info.clone());
+    }
+    layout_webviews(&app);
+    emit_state(&app);
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn cmd_install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let dl_url = {
+        let mut inner = state.inner.lock().unwrap();
+        if inner.update_downloading {
+            return Ok(());
+        }
+        let url = inner
+            .available_update
+            .as_ref()
+            .and_then(|u| u.download_url.clone())
+            .ok_or_else(|| "URL installer pembaruan tidak tersedia.".to_string())?;
+        inner.update_downloading = true;
+        inner.update_progress = 0;
+        url
+    };
+    emit_state(&app);
+
+    let res = crate::updater::download_and_launch_update(app.clone(), dl_url).await;
+    if res.is_err() {
+        let mut inner = state.inner.lock().unwrap();
+        inner.update_downloading = false;
+        inner.update_progress = 0;
+        drop(inner);
+        emit_state(&app);
+    }
+    res
+}
+
+#[tauri::command]
+pub fn cmd_dismiss_update_banner(app: AppHandle, state: State<'_, AppState>) {
+    state.inner.lock().unwrap().show_update_banner = false;
+    layout_webviews(&app);
+    emit_state(&app);
+}

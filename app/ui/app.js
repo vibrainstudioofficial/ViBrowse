@@ -218,6 +218,26 @@ function renderToolbar() {
   if (defBanner) {
     defBanner.classList.toggle('hidden', !state.show_default_banner);
   }
+
+  const updBanner = $('update-banner');
+  if (updBanner) {
+    const upd = state.available_update;
+    const showUpd = Boolean(state.show_update_banner && upd && upd.has_update);
+    updBanner.classList.toggle('hidden', !showUpd);
+    if (showUpd) {
+      const txt = $('update-banner-text');
+      const installBtn = $('btn-update-install');
+      if (state.update_downloading) {
+        txt.textContent = `Mengunduh ViBrowse ${upd.latest_version}... ${state.update_progress || 0}%`;
+        installBtn.disabled = true;
+        installBtn.textContent = `${state.update_progress || 0}%`;
+      } else {
+        txt.textContent = `Versi baru ViBrowse ${upd.latest_version} tersedia! (Saat ini: ${upd.current_version})`;
+        installBtn.disabled = false;
+        installBtn.textContent = 'Update Sekarang';
+      }
+    }
+  }
   if (tab && tab.last_blocked_popup) {
     popupBtn.title = `Popup diblokir: ${tab.last_blocked_popup} — Klik untuk kelola/buka`;
   }
@@ -659,6 +679,22 @@ function renderSettingsPanel(body) {
       </div>
     </div>
     <div class="setting-group">
+      <strong>Pembaruan (Auto Update)</strong>
+      <div id="settings-update-status" class="muted">${
+        state.update_downloading
+          ? `Mengunduh pembaruan... ${state.update_progress || 0}%`
+          : state.available_update
+            ? state.available_update.has_update
+              ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
+              : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
+            : 'Versi terpasang: V1.2a'
+      }</div>
+      <div class="panel-row">
+        <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>
+        ${state.available_update && state.available_update.has_update ? '<button id="btn-settings-install-update" class="btn btn-primary">Update Sekarang</button>' : ''}
+      </div>
+    </div>
+    <div class="setting-group">
       <strong>Actions</strong>
       <button id="btn-sleep-all" class="btn btn-primary btn-with-icon">${iconSvg('sleep')}<span>Sleep All Inactive Tabs Now</span></button>
       <button id="btn-open-about" class="btn btn-with-icon">${iconSvg('info')}<span>About ViBrowse</span></button>
@@ -704,6 +740,23 @@ function renderSettingsPanel(body) {
     setDefBtn.onclick = () => invoke('cmd_set_default_browser').catch((err) => alert(String(err)));
   }
   $('btn-settings-recheck-default').onclick = () => invoke('cmd_recheck_default_browser');
+  $('btn-settings-check-update').onclick = async () => {
+    const stEl = $('settings-update-status');
+    stEl.textContent = 'Mengecek pembaruan di GitHub...';
+    try {
+      const info = await invoke('cmd_check_update');
+      stEl.textContent = info.has_update
+        ? `Versi baru ${info.latest_version} tersedia!`
+        : `ViBrowse ${info.current_version} sudah versi terbaru.`;
+      renderSidePanel();
+    } catch (err) {
+      stEl.textContent = `Gagal cek update: ${String(err)}`;
+    }
+  };
+  const instUpdBtn = $('btn-settings-install-update');
+  if (instUpdBtn) {
+    instUpdBtn.onclick = () => invoke('cmd_install_update').catch((err) => alert(String(err)));
+  }
   $('btn-sleep-all').onclick = () => invoke('cmd_sleep_inactive_tabs');
   $('btn-open-about').onclick = () => {
     invoke('cmd_set_panel', { panel: null });
@@ -768,6 +821,14 @@ $('about-open-settings').onclick = () => invoke('cmd_set_panel', { panel: 'setti
 $('btn-set-default').onclick = () => invoke('cmd_set_default_browser').catch((err) => alert(String(err)));
 $('btn-default-never').onclick = () => invoke('cmd_dismiss_default_banner', { neverAsk: true });
 $('btn-default-close').onclick = () => invoke('cmd_dismiss_default_banner', { neverAsk: false });
+$('btn-update-install').onclick = () => invoke('cmd_install_update').catch((err) => alert(String(err)));
+$('btn-update-release').onclick = () => {
+  const url = state.available_update && state.available_update.release_url
+    ? state.available_update.release_url
+    : 'https://github.com/fransetiaone/ViBrowse/releases/latest';
+  invoke('cmd_new_tab', { url, incognito: false });
+};
+$('btn-update-close').onclick = () => invoke('cmd_dismiss_update_banner');
 
 $('btn-bookmark').onclick = async () => {
   const tab = activeTab();

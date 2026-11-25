@@ -632,6 +632,11 @@ html, body, #app {
   border-radius: 6px;
 }
 
+.update-banner {
+  background: rgba(16, 185, 129, 0.14);
+  border-top-color: rgba(16, 185, 129, 0.35);
+}
+
 /* ---- WORKSPACE ---- */
 #workspace {
   flex: 1;

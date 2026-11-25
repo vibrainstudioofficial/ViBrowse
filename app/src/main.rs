@@ -7,6 +7,7 @@ mod downloader;
 mod state;
 mod storage;
 mod tabs;
+mod updater;
 mod util;
 
 use state::AppState;
@@ -72,6 +73,27 @@ fn main() {
             start_tab_sleeper_loop(app.handle().clone());
             tauri::async_runtime::spawn_blocking(default_browser::register_browser);
 
+            let app_upd = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                if let Ok(info) = updater::check_for_update().await {
+                    if let Some(state) = app_upd.try_state::<AppState>() {
+                        let has_upd = info.has_update;
+                        {
+                            let mut inner = state.inner.lock().unwrap();
+                            inner.available_update = Some(info);
+                            if has_upd {
+                                inner.show_update_banner = true;
+                            }
+                        }
+                        if has_upd {
+                            layout_webviews(&app_upd);
+                        }
+                        tabs::emit_state(&app_upd);
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,6 +141,9 @@ fn main() {
             commands::cmd_set_default_browser,
             commands::cmd_dismiss_default_banner,
             commands::cmd_recheck_default_browser,
+            commands::cmd_check_update,
+            commands::cmd_install_update,
+            commands::cmd_dismiss_update_banner,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ViBrowse");
