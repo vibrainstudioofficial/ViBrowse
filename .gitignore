@@ -1,6 +1,10 @@
 # Rust / Cargo build artifacts & Tauri generated schemas
-/target/
-/gen/
+/app/target/
+/app/gen/
+
+# Landing page build artifacts & dependencies
+/landingpage/node_modules/
+/landingpage/dist/
 
 # OS & editor files
 .DS_Store
@@ -9,12 +13,12 @@ Thumbs.db
 *.log
 
 # Compiled release binaries (uploaded to GitHub Releases instead of bloating git history)
-/release/**/*.exe
-/release/**/*.zip
-/release/**/*.msi
-/release/**/*.deb
-/release/**/*.rpm
-/release/**/*.AppImage
-/release/**/*.apk
-/release/**/*.aab
-/release/windows/ViBrowse-*-Portable/
+/app/release/**/*.exe
+/app/release/**/*.zip
+/app/release/**/*.msi
+/app/release/**/*.deb
+/app/release/**/*.rpm
+/app/release/**/*.AppImage
+/app/release/**/*.apk
+/app/release/**/*.aab
+/app/release/windows/ViBrowse-*-Portable/
