@@ -360,16 +360,13 @@ fn toggle_set_entry(lock: &RwLock<HashSet<String>>, host: &str) -> bool {
     }
 }
 
-/// Generates the lightweight initialization script injected into every content tab webview.
+/// Generates the lightweight initialization script injected into every content tab webview
+/// (AdBlock + Smart Popup Blocker + IDM-style Floating Video Downloader button).
 pub fn build_tab_init_script(
     adblock_enabled: bool,
     popup_blocker_enabled: bool,
     blocked_domains_json: &str,
 ) -> String {
-    if !adblock_enabled && !popup_blocker_enabled {
-        return String::new();
-    }
-
     format!(
         r#"
 (function() {{
@@ -379,6 +376,7 @@ pub fn build_tab_init_script(
   const ADBLOCK_ON = {adblock_enabled};
   const POPUP_BLOCK_ON = {popup_blocker_enabled};
   const BLOCKED_DOMAINS = new Set({blocked_domains_json});
+  const ORIG_WINDOW_OPEN = window.open ? window.open.bind(window) : null;
 
   function isBlockedHost(urlStr) {{
     try {{
@@ -466,6 +464,244 @@ pub fn build_tab_init_script(
       }}
     }}, true);
   }}
+
+  // ---- IDM-STYLE FLOATING VIDEO DOWNLOAD BUTTON ----
+  (function initFloatingDownloader() {{
+    const PLATFORM_RE = /(youtube\.com\/(watch|shorts)|youtu\.be\/|tiktok\.com\/.*\/video|instagram\.com\/(reel|p|tv)\/|facebook\.com\/.*(videos|reel|watch)|fb\.watch\/|vimeo\.com\/\d+|dailymotion\.com\/video|twitch\.tv\/videos|bilibili\.com\/video|x\.com\/.*\/status|twitter\.com\/.*\/status)/i;
+    let host = null;
+    let wrap = null;
+    let menu = null;
+    let mainBtn = null;
+    let labelEl = null;
+    let dismissedHref = null;
+    let activeVideo = null;
+    let menuOpen = false;
+
+    function isVideoPlatformUrl(href) {{
+      return PLATFORM_RE.test(href || '');
+    }}
+
+    function resolveTargetUrl(video) {{
+      const href = location.href;
+      if (isVideoPlatformUrl(href)) return href;
+      const src = video ? (video.currentSrc || video.src || '') : '';
+      if (src && /^https?:\/\//i.test(src)) return src;
+      return href;
+    }}
+
+    function triggerDownload(quality) {{
+      const target = resolveTargetUrl(activeVideo);
+      if (!target) return;
+      const dlUrl = 'vibrowse-dl://video?url=' + encodeURIComponent(target) + '&quality=' + encodeURIComponent(quality || 'best');
+      if (ORIG_WINDOW_OPEN) {{
+        ORIG_WINDOW_OPEN(dlUrl, '_blank');
+      }} else {{
+        window.open(dlUrl, '_blank');
+      }}
+      menuOpen = false;
+      if (menu) menu.style.display = 'none';
+      if (labelEl) {{
+        labelEl.textContent = 'Mengunduh...';
+        setTimeout(() => {{
+          if (labelEl) labelEl.textContent = 'Download Video';
+        }}, 2200);
+      }}
+    }}
+
+    function ensureUi() {{
+      if (host && host.isConnected) return;
+      host = document.createElement('div');
+      host.id = 'vibrowse-idm-host';
+      host.style.cssText = 'position:fixed;top:0;left:0;z-index:2147483646;pointer-events:none;';
+      const shadow = host.attachShadow({{ mode: 'closed' }});
+      shadow.innerHTML = `
+        <style>
+          .vb-wrap {{
+            position: fixed;
+            display: none;
+            align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 12px;
+            pointer-events: auto;
+            user-select: none;
+          }}
+          .vb-pill {{
+            display: inline-flex;
+            align-items: stretch;
+            background: rgba(15, 23, 42, 0.92);
+            border: 1px solid rgba(59, 130, 246, 0.55);
+            border-radius: 9px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(8px);
+            overflow: hidden;
+          }}
+          .vb-btn {{
+            border: none;
+            background: transparent;
+            color: #f8fafc;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            transition: background 0.15s;
+          }}
+          .vb-btn:hover {{ background: rgba(59, 130, 246, 0.3); }}
+          .vb-btn.primary {{
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.85), rgba(79, 70, 229, 0.85));
+          }}
+          .vb-btn.primary:hover {{
+            background: linear-gradient(135deg, #2563eb, #4f46e5);
+          }}
+          .vb-sep {{
+            width: 1px;
+            background: rgba(255, 255, 255, 0.16);
+          }}
+          .vb-close {{
+            padding: 6px 7px;
+            color: #94a3b8;
+          }}
+          .vb-close:hover {{ color: #fff; background: rgba(239, 68, 68, 0.35); }}
+          .vb-menu {{
+            position: absolute;
+            top: calc(100% + 5px);
+            right: 0;
+            min-width: 158px;
+            background: rgba(15, 23, 42, 0.97);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 9px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+            padding: 4px;
+            display: none;
+            flex-direction: column;
+            gap: 2px;
+          }}
+          .vb-opt {{
+            border: none;
+            background: transparent;
+            color: #e2e8f0;
+            text-align: left;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }}
+          .vb-opt:hover {{ background: rgba(59, 130, 246, 0.28); color: #fff; }}
+          .vb-tag {{ font-size: 10px; color: #93c5fd; font-weight: 600; }}
+          svg {{ width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }}
+        </style>
+        <div class="vb-wrap" id="vb-wrap">
+          <div class="vb-pill">
+            <button class="vb-btn primary" id="vb-dl" title="Unduh video dengan ViBrowse Download Manager">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="vb-lbl">Download Video</span>
+            </button>
+            <div class="vb-sep"></div>
+            <button class="vb-btn" id="vb-caret" title="Pilih kualitas video">
+              <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="vb-sep"></div>
+            <button class="vb-btn vb-close" id="vb-close" title="Sembunyikan tombol ini">
+              <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="vb-menu" id="vb-menu">
+            <button class="vb-opt" data-q="best"><span>Best Quality</span><span class="vb-tag">MP4</span></button>
+            <button class="vb-opt" data-q="1080p"><span>Full HD 1080p</span><span class="vb-tag">MP4</span></button>
+            <button class="vb-opt" data-q="720p"><span>HD 720p</span><span class="vb-tag">MP4</span></button>
+            <button class="vb-opt" data-q="480p"><span>SD 480p</span><span class="vb-tag">MP4</span></button>
+            <button class="vb-opt" data-q="audio"><span>Audio Only</span><span class="vb-tag">M4A</span></button>
+          </div>
+        </div>
+      `;
+
+      wrap = shadow.getElementById('vb-wrap');
+      menu = shadow.getElementById('vb-menu');
+      mainBtn = shadow.getElementById('vb-dl');
+      labelEl = shadow.getElementById('vb-lbl');
+
+      mainBtn.addEventListener('click', (e) => {{
+        e.stopPropagation();
+        triggerDownload('best');
+      }});
+      shadow.getElementById('vb-caret').addEventListener('click', (e) => {{
+        e.stopPropagation();
+        menuOpen = !menuOpen;
+        menu.style.display = menuOpen ? 'flex' : 'none';
+      }});
+      shadow.getElementById('vb-close').addEventListener('click', (e) => {{
+        e.stopPropagation();
+        dismissedHref = location.href;
+        wrap.style.display = 'none';
+        menuOpen = false;
+        menu.style.display = 'none';
+      }});
+      shadow.querySelectorAll('.vb-opt').forEach((btn) => {{
+        btn.addEventListener('click', (e) => {{
+          e.stopPropagation();
+          triggerDownload(btn.getAttribute('data-q') || 'best');
+        }});
+      }});
+      document.addEventListener('click', () => {{
+        if (menuOpen) {{
+          menuOpen = false;
+          if (menu) menu.style.display = 'none';
+        }}
+      }});
+      (document.documentElement || document.body).appendChild(host);
+    }}
+
+    function findPrimaryVideo() {{
+      const videos = document.querySelectorAll('video');
+      let best = null;
+      let bestArea = 0;
+      for (const v of videos) {{
+        const r = v.getBoundingClientRect();
+        if (r.width < 220 || r.height < 120) continue;
+        if (r.bottom < 40 || r.top > window.innerHeight - 40) continue;
+        const hasMedia = isVideoPlatformUrl(location.href) || Boolean(v.currentSrc || v.src || v.readyState > 0);
+        if (!hasMedia) continue;
+        const area = r.width * r.height;
+        if (area > bestArea) {{
+          bestArea = area;
+          best = v;
+        }}
+      }}
+      return best;
+    }}
+
+    function updatePosition() {{
+      if (document.fullscreenElement || dismissedHref === location.href) {{
+        if (wrap) wrap.style.display = 'none';
+        return;
+      }}
+      const video = findPrimaryVideo();
+      activeVideo = video;
+      if (!video) {{
+        if (wrap) wrap.style.display = 'none';
+        return;
+      }}
+      ensureUi();
+      const r = video.getBoundingClientRect();
+      const top = Math.max(8, Math.min(window.innerHeight - 48, r.top + 10));
+      const left = Math.max(8, Math.min(window.innerWidth - 196, r.right - 192));
+      wrap.style.top = top + 'px';
+      wrap.style.left = left + 'px';
+      wrap.style.display = 'flex';
+    }}
+
+    setInterval(updatePosition, 800);
+    window.addEventListener('scroll', updatePosition, {{ passive: true }});
+    window.addEventListener('resize', updatePosition, {{ passive: true }});
+    document.addEventListener('fullscreenchange', updatePosition);
+  }})();
 }})();
 "#
     )

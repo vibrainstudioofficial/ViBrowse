@@ -199,6 +199,32 @@ pub fn layout_webviews(app: &AppHandle) {
     }
 }
 
+fn handle_vibrowse_dl_url(app: &AppHandle, url: &Url) {
+    let mut target_url = String::new();
+    let mut quality = "best".to_string();
+    for (k, v) in url.query_pairs() {
+        if k == "url" {
+            target_url = v.into_owned();
+        } else if k == "quality" {
+            quality = v.into_owned();
+        }
+    }
+    if !target_url.is_empty() {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(state) = app.try_state::<AppState>() {
+                let _ = state
+                    .dm
+                    .start_video_download(app.clone(), target_url, quality)
+                    .await;
+                state.inner.lock().unwrap().active_panel = Some("downloads".to_string());
+                layout_webviews(&app);
+                emit_state(&app);
+            }
+        });
+    }
+}
+
 fn spawn_tab_webview(
     app: &AppHandle,
     tab_id: &str,
@@ -242,6 +268,10 @@ fn spawn_tab_webview(
             let id = tab_id.to_string();
             move |nav_url| {
                 let url_s = nav_url.as_str();
+                if url_s.starts_with("vibrowse-dl://") {
+                    handle_vibrowse_dl_url(&app, nav_url);
+                    return false;
+                }
                 if url_s.starts_with("magnet:") {
                     let magnet = url_s.to_string();
                     let app = app.clone();
@@ -381,6 +411,10 @@ fn spawn_tab_webview(
             let id = tab_id.to_string();
             move |new_url, _features| {
                 let url_s = new_url.to_string();
+                if url_s.starts_with("vibrowse-dl://") {
+                    handle_vibrowse_dl_url(&app, &new_url);
+                    return NewWindowResponse::Deny;
+                }
                 if let Some(state) = app.try_state::<AppState>() {
                     let (source_url, adblock_enabled, popup_blocker_enabled) = {
                         let inner = state.inner.lock().unwrap();

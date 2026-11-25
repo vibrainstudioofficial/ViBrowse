@@ -203,18 +203,14 @@ impl DownloadManager {
         (paused, canceled)
     }
 
-    pub fn resolve_ytdlp_path(&self) -> Option<PathBuf> {
-        let local = self.bin_dir.join(ytdlp_bin_name());
-        if local.exists() {
-            return Some(local);
-        }
+    pub fn resolve_binary_in_path(name: &str) -> Option<PathBuf> {
         let lookup = if cfg!(target_os = "windows") {
             "where"
         } else {
             "which"
         };
         let mut cmd = std::process::Command::new(lookup);
-        cmd.arg("yt-dlp");
+        cmd.arg(name);
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -230,6 +226,14 @@ impl DownloadManager {
                     .map(|line| PathBuf::from(line.trim()))
             })
             .filter(|p| p.exists())
+    }
+
+    pub fn resolve_ytdlp_path(&self) -> Option<PathBuf> {
+        let local = self.bin_dir.join(ytdlp_bin_name());
+        if local.exists() {
+            return Some(local);
+        }
+        Self::resolve_binary_in_path("yt-dlp")
     }
 
     pub fn engine_status(&self) -> EngineStatusDto {
@@ -327,40 +331,72 @@ impl DownloadManager {
         Ok(id)
     }
 
-    /// 2. YouTube & 1000+ Platforms Video Downloader (`yt-dlp`)
+    /// 2. YouTube & 1000+ Platforms Video Downloader (`yt-dlp`, auto-installs if missing)
     pub async fn start_video_download(
         &self,
         app: AppHandle,
         url: String,
         quality: String,
     ) -> Result<String, String> {
-        let ytdlp_path = self.resolve_ytdlp_path().ok_or_else(|| {
-            "yt-dlp belum terpasang. Klik tombol 'Install yt-dlp (1-Klik)' di Download Manager."
-                .to_string()
-        })?;
+        // Direct MP4/WebM/MKV links download faster via 8-connection IDM HTTP engine.
+        let clean_path = url.to_lowercase();
+        let path_no_q = clean_path.split('?').next().unwrap_or("");
+        if [".mp4", ".webm", ".mkv", ".mov", ".mp3", ".m4a"]
+            .iter()
+            .any(|ext| path_no_q.ends_with(ext))
+        {
+            return self.start_http_download(app, url, 8, None).await;
+        }
 
         let id = short_id();
+        let has_ffmpeg = Self::resolve_binary_in_path("ffmpeg").is_some();
         let (quality_label, format_spec) = match quality.as_str() {
             "1080p" => (
                 "1080p MP4",
-                "best[height<=1080][ext=mp4]/best[height<=1080]/best",
+                if has_ffmpeg {
+                    "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/b"
+                } else {
+                    "b[height<=1080][ext=mp4]/b[height<=1080]/b[ext=mp4]/b"
+                },
             ),
             "720p" => (
                 "720p MP4",
-                "best[height<=720][ext=mp4]/best[height<=720]/best",
+                if has_ffmpeg {
+                    "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b"
+                } else {
+                    "b[height<=720][ext=mp4]/b[height<=720]/b[ext=mp4]/b"
+                },
             ),
             "480p" => (
                 "480p MP4",
-                "best[height<=480][ext=mp4]/best[height<=480]/best",
+                if has_ffmpeg {
+                    "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b[height<=480]/b"
+                } else {
+                    "b[height<=480][ext=mp4]/b[height<=480]/b[ext=mp4]/b"
+                },
             ),
-            "audio" => ("Audio (M4A/MP3)", "bestaudio[ext=m4a]/bestaudio/best"),
-            _ => ("Best Quality MP4", "best[ext=mp4]/best"),
+            "audio" => ("Audio (M4A)", "ba[ext=m4a]/ba/b"),
+            _ => (
+                "Best Quality MP4",
+                if has_ffmpeg {
+                    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
+                } else {
+                    "b[ext=mp4]/b"
+                },
+            ),
+        };
+
+        let existing_ytdlp = self.resolve_ytdlp_path();
+        let initial_name = if existing_ytdlp.is_some() {
+            infer_filename_from_url(&url)
+        } else {
+            "Menyiapkan engine yt-dlp...".to_string()
         };
 
         let task = DownloadTaskDto::new(
             id.clone(),
             "video",
-            infer_filename_from_url(&url),
+            initial_name,
             url.clone(),
             self.download_dir.to_string_lossy().to_string(),
             TaskStatus::Downloading,
@@ -375,23 +411,62 @@ impl DownloadManager {
         let format_str = format_spec.to_string();
 
         tauri::async_runtime::spawn(async move {
+            let ytdlp_path = match existing_ytdlp {
+                Some(p) => p,
+                None => {
+                    let install_res = if let Some(state) = app.try_state::<crate::state::AppState>()
+                    {
+                        state.dm.install_ytdlp(app.clone()).await
+                    } else {
+                        Err("AppState tidak tersedia".to_string())
+                    };
+                    match install_res {
+                        Ok(p) => {
+                            update_task(&tasks, &task_id, |t| {
+                                t.filename = infer_filename_from_url(&url);
+                            });
+                            Self::emit_dm(&app);
+                            PathBuf::from(p)
+                        }
+                        Err(e) => {
+                            update_task(&tasks, &task_id, |t| {
+                                t.status = TaskStatus::Failed;
+                                t.error = Some(format!("Auto-install yt-dlp gagal: {}", e));
+                            });
+                            Self::emit_dm(&app);
+                            return;
+                        }
+                    }
+                }
+            };
+
             let mut cmd = Command::new(&ytdlp_path);
-            cmd.args([
-                "--newline",
-                "--progress",
-                "--no-warnings",
-                "--concurrent-fragments",
-                "4",
-                "-P",
-                &download_dir.to_string_lossy(),
-                "-o",
-                "%(title).120s.%(ext)s",
-                "-f",
-                &format_str,
-                &url,
-            ])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            let mut args: Vec<String> = vec![
+                "--no-playlist".into(),
+                "--newline".into(),
+                "--progress".into(),
+                "--retries".into(),
+                "3".into(),
+                "--fragment-retries".into(),
+                "3".into(),
+                "--concurrent-fragments".into(),
+                "4".into(),
+                "-P".into(),
+                download_dir.to_string_lossy().to_string(),
+                "-o".into(),
+                "%(title).120s.%(ext)s".into(),
+                "-f".into(),
+                format_str,
+            ];
+            if has_ffmpeg && quality != "audio" {
+                args.push("--merge-output-format".into());
+                args.push("mp4".into());
+            }
+            args.push(url.clone());
+
+            cmd.args(&args)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
 
             #[cfg(target_os = "windows")]
             cmd.creation_flags(CREATE_NO_WINDOW);
@@ -408,6 +483,21 @@ impl DownloadManager {
                 }
             };
 
+            // Drain stderr concurrently so the pipe never deadlocks and we capture real errors.
+            let stderr_handle = child.stderr.take().map(|err_io| {
+                tauri::async_runtime::spawn(async move {
+                    let mut reader = BufReader::new(err_io).lines();
+                    let mut last_err = String::new();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        let t = line.trim();
+                        if !t.is_empty() && (t.starts_with("ERROR:") || last_err.is_empty()) {
+                            last_err = t.to_string();
+                        }
+                    }
+                    last_err
+                })
+            });
+
             if let Some(out) = child.stdout.take() {
                 let mut reader = BufReader::new(out).lines();
                 let mut last_emit = Instant::now();
@@ -422,8 +512,20 @@ impl DownloadManager {
                         return;
                     }
                     let trimmed = line.trim();
-                    if let Some(dest) = trimmed.strip_prefix("[download] Destination: ") {
-                        let dest_str = dest.trim();
+                    let dest_opt = trimmed
+                        .strip_prefix("[download] Destination: ")
+                        .map(|s| s.trim())
+                        .or_else(|| {
+                            trimmed
+                                .strip_prefix("[Merger] Merging formats into \"")
+                                .and_then(|s| s.strip_suffix('"'))
+                        })
+                        .or_else(|| {
+                            trimmed
+                                .strip_prefix("[download] ")
+                                .and_then(|s| s.strip_suffix(" has already been downloaded"))
+                        });
+                    if let Some(dest_str) = dest_opt {
                         let fname = PathBuf::from(dest_str)
                             .file_name()
                             .and_then(|n| n.to_str())
@@ -457,6 +559,11 @@ impl DownloadManager {
                 }
             }
 
+            let err_msg = match stderr_handle {
+                Some(h) => h.await.unwrap_or_default(),
+                None => String::new(),
+            };
+
             match child.wait().await {
                 Ok(s) if s.success() => update_task(&tasks, &task_id, |t| {
                     t.status = TaskStatus::Completed;
@@ -469,7 +576,11 @@ impl DownloadManager {
                 Ok(s) => update_task(&tasks, &task_id, |t| {
                     if t.status != TaskStatus::Canceled {
                         t.status = TaskStatus::Failed;
-                        t.error = Some(format!("yt-dlp berhenti dengan kode {}", s));
+                        t.error = Some(if !err_msg.is_empty() {
+                            err_msg
+                        } else {
+                            format!("yt-dlp berhenti dengan kode {}", s)
+                        });
                         t.speed_bps = 0;
                     }
                 }),
