@@ -35,11 +35,11 @@ export const DOWNLOAD_PACKAGES: DownloadPackage[] = [
     title: 'Windows Installer',
     subtitle: 'Windows 10 / 11 (x64)',
     filename: `ViBrowse-${DEFAULT_VERSION}-Setup.exe`,
-    size: '2.45 MB',
+    size: '2.46 MB',
     recommended: true,
     badge: 'Direkomendasikan',
     url: `${RELEASE_BASE_URL}/ViBrowse-${DEFAULT_VERSION}-Setup.exe`,
-    hint: 'Otomatis membuat shortcut Desktop, Start Menu, & Uninstaller tanpa butuh Admin.',
+    hint: 'Otomatis membuat shortcut Desktop, Start Menu, registrasi Default Browser, & Uninstaller tanpa butuh Admin.',
   },
   {
     id: 'win-portable',
@@ -47,7 +47,7 @@ export const DOWNLOAD_PACKAGES: DownloadPackage[] = [
     title: 'Windows Portable',
     subtitle: 'Windows 10 / 11 (x64)',
     filename: `ViBrowse-${DEFAULT_VERSION}-Portable.zip`,
-    size: '2.91 MB',
+    size: '2.93 MB',
     badge: 'Tanpa Instalasi',
     url: `${RELEASE_BASE_URL}/ViBrowse-${DEFAULT_VERSION}-Portable.zip`,
     hint: 'Ekstrak arsip ZIP lalu jalankan langsung vibrowse.exe dari folder mana saja.',
@@ -78,7 +78,7 @@ export const DOWNLOAD_PACKAGES: DownloadPackage[] = [
 
 export const FEATURES: FeatureItem[] = [
   {
-    tag: '2.45 MB',
+    tag: '2.46 MB',
     title: 'Ukuran Ekstrem Ringan',
     desc: 'Dikompilasi dengan Rust + Fat LTO tanpa membundel Chromium 200 MB. Unduh dan pasang dalam hitungan detik.',
   },
@@ -95,17 +95,17 @@ export const FEATURES: FeatureItem[] = [
   {
     tag: 'IDM + P2P',
     title: 'Download Manager Terpadu',
-    desc: 'Akselerator HTTP hingga 16 koneksi paralel, tombol floating unduh YouTube/Video ala IDM, serta klien BitTorrent/Magnet native Rust.',
+    desc: 'Akselerator HTTP hingga 16 koneksi paralel, tombol floating unduh YouTube/X/Video ala IDM, serta klien BitTorrent/Magnet native Rust.',
   },
   {
-    tag: 'Privasi',
-    title: 'Incognito & SQLite Lokal',
-    desc: 'Mode privat terisolasi tanpa riwayat, database Bookmarks & History berbasis SQLite WAL lokal tanpa akun maupun pelacakan cloud.',
+    tag: 'Otomatis',
+    title: 'Auto Update & Default Browser',
+    desc: 'Deteksi pembaruan otomatis dari GitHub Releases (1-klik pasang update) serta banner pengecekan Default Browser ala Chrome.',
   },
   {
     tag: 'Modern UI',
-    title: 'Light/Dark Mode & Fullscreen',
-    desc: 'Antarmuka ikon vektor SVG tajam, peralihan tema instan, Chrome shortcuts, DevTools (F12), dan True Monitor Fullscreen (F11).',
+    title: 'Privasi, Light/Dark & Fullscreen',
+    desc: 'Mode Incognito + SQLite lokal tanpa akun, tema terang/gelap instan, Chrome shortcuts, DevTools (F12), dan True Monitor Fullscreen (F11).',
   },
 ];
 
