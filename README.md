@@ -1,6 +1,16 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/fransetiaone/ViBrowse/main/ui/logo.webp" alt="ViBrowse Logo" width="96" height="96" />
-  <h1>ViBrowse</h1>
+
+```text
+██╗   ██╗ ██╗ ██████╗                                                  
+██║   ██║ ╚═╝ ██╔══██╗                                                 
+██║   ██║ ██╗ ██║  ██║ ██████╗   ██████╗  ██╗    ██╗ ███████╗  ██████╗ 
+██║   ██║ ██║ ██████╔╝ ██╔══██╗ ██╔═══██╗ ██║    ██║ ██╔════╝ ██╔═══██╗
+╚██╗ ██╔╝ ██║ ██╔══██╗ ██║  ╚═╝ ██║   ██║ ██║ █╗ ██║ ███████╗ ████████║
+ ╚████╔╝  ██║ ██║  ██║ ██║      ██║   ██║ ██║███╗██║ ╚════██║ ██╔═════╝
+  ╚██╔╝   ██║ ██████╔╝ ██║      ╚██████╔╝ ╚███╔███╔╝ ███████║ ╚███████╗
+   ╚═╝    ╚═╝ ╚═════╝  ╚═╝       ╚═════╝   ╚══╝╚══╝  ╚══════╝  ╚══════╝
+```
+
   <p><strong>Browser Desktop Modern yang Ultra-Ringan (~2.45 MB), Hemat RAM, &amp; Kompatibel Setara Google Chrome</strong></p>
   <p>
     <a href="https://github.com/fransetiaone/ViBrowse/releases/latest"><img src="https://img.shields.io/badge/Release-V1.2a-2563eb?style=for-the-badge" alt="Version V1.2a" /></a>
