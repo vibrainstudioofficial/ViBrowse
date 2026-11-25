@@ -598,6 +598,40 @@ html, body, #app {
   color: var(--text-primary);
 }
 
+/* ---- DEFAULT BROWSER BANNER (34px, Chrome-style) ---- */
+.default-banner {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  background: rgba(59, 130, 246, 0.14);
+  border-top: 1px solid rgba(59, 130, 246, 0.3);
+  font-size: 12px;
+}
+
+.default-banner-text {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.default-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-banner {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  border-radius: 6px;
+}
+
 /* ---- WORKSPACE ---- */
 #workspace {
   flex: 1;

@@ -2,6 +2,7 @@
 
 mod adblock;
 mod commands;
+mod default_browser;
 mod downloader;
 mod state;
 mod storage;
@@ -60,8 +61,16 @@ fn main() {
                 }
             });
 
-            let _ = create_tab(app.handle(), None, false, true);
+            let initial_url = std::env::args().skip(1).find(|arg| {
+                let lower = arg.to_lowercase();
+                lower.starts_with("http://")
+                    || lower.starts_with("https://")
+                    || lower.ends_with(".html")
+                    || lower.ends_with(".htm")
+            });
+            let _ = create_tab(app.handle(), initial_url, false, true);
             start_tab_sleeper_loop(app.handle().clone());
+            tauri::async_runtime::spawn_blocking(default_browser::register_browser);
 
             Ok(())
         })
@@ -107,6 +116,9 @@ fn main() {
             commands::cmd_dm_cancel,
             commands::cmd_dm_remove,
             commands::cmd_dm_clear_finished,
+            commands::cmd_set_default_browser,
+            commands::cmd_dismiss_default_banner,
+            commands::cmd_recheck_default_browser,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ViBrowse");

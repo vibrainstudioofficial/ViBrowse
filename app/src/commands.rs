@@ -428,3 +428,56 @@ pub fn cmd_dm_remove(app: AppHandle, state: State<'_, AppState>, id: String) {
 pub fn cmd_dm_clear_finished(app: AppHandle, state: State<'_, AppState>) {
     state.dm.clear_finished(app);
 }
+
+#[tauri::command]
+pub fn cmd_set_default_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    crate::default_browser::set_or_open_default_browser()?;
+    let is_def = crate::default_browser::is_default_browser();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.is_default_browser = is_def;
+        inner.show_default_banner = false;
+    }
+    layout_webviews(&app);
+    emit_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_dismiss_default_banner(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    never_ask: bool,
+) -> Result<(), String> {
+    let settings_to_save = {
+        let mut inner = state.inner.lock().unwrap();
+        inner.show_default_banner = false;
+        if never_ask {
+            inner.settings.check_default_browser = false;
+            Some(inner.settings.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(s) = settings_to_save {
+        state.storage.save_settings(&s)?;
+    }
+    layout_webviews(&app);
+    emit_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_recheck_default_browser(app: AppHandle, state: State<'_, AppState>) -> bool {
+    let is_def = crate::default_browser::is_default_browser();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.is_default_browser = is_def;
+        if is_def {
+            inner.show_default_banner = false;
+        }
+    }
+    layout_webviews(&app);
+    emit_state(&app);
+    is_def
+}

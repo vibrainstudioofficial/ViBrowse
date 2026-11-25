@@ -47,6 +47,8 @@ pub struct BrowserSettings {
     pub show_bookmarks_bar: bool,
     #[serde(default = "default_theme")]
     pub theme: String, // "dark" | "light"
+    #[serde(default = "default_true")]
+    pub check_default_browser: bool,
 }
 
 impl Default for BrowserSettings {
@@ -58,6 +60,7 @@ impl Default for BrowserSettings {
             popup_blocker_enabled: true,
             show_bookmarks_bar: true,
             theme: "dark".to_string(),
+            check_default_browser: true,
         }
     }
 }

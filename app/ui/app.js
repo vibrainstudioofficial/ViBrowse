@@ -213,6 +213,11 @@ function renderToolbar() {
 
   const popupBtn = $('btn-popup-blocked');
   popupBtn.classList.toggle('hidden', !(tab && tab.last_blocked_popup));
+
+  const defBanner = $('default-browser-banner');
+  if (defBanner) {
+    defBanner.classList.toggle('hidden', !state.show_default_banner);
+  }
   if (tab && tab.last_blocked_popup) {
     popupBtn.title = `Popup diblokir: ${tab.last_blocked_popup} — Klik untuk kelola/buka`;
   }
@@ -640,6 +645,18 @@ function renderSettingsPanel(body) {
         <label for="chk-bmbar"><strong>Show Bookmarks Bar</strong></label>
         <input id="chk-bmbar" type="checkbox" ${state.settings.show_bookmarks_bar ? 'checked' : ''} />
       </div>
+      <div class="setting-row">
+        <label for="chk-defcheck"><strong>Check Default Browser on Startup</strong></label>
+        <input id="chk-defcheck" type="checkbox" ${state.settings.check_default_browser !== false ? 'checked' : ''} />
+      </div>
+    </div>
+    <div class="setting-group">
+      <strong>Default Browser</strong>
+      <div class="muted">${state.is_default_browser ? 'ViBrowse sudah menjadi browser default Anda.' : 'ViBrowse belum menjadi browser default.'}</div>
+      <div class="panel-row">
+        ${state.is_default_browser ? '' : '<button id="btn-settings-set-default" class="btn btn-primary" style="flex:1;">Jadikan Default</button>'}
+        <button id="btn-settings-recheck-default" class="btn">Cek Ulang</button>
+      </div>
     </div>
     <div class="setting-group">
       <strong>Actions</strong>
@@ -675,11 +692,18 @@ function renderSettingsPanel(body) {
     search_engine: $('sel-search').value,
     tab_sleep_minutes: Number($('sel-sleep').value),
     show_bookmarks_bar: $('chk-bmbar').checked,
+    check_default_browser: $('chk-defcheck').checked,
   });
   $('sel-theme').onchange = save;
   $('sel-search').onchange = save;
   $('sel-sleep').onchange = save;
   $('chk-bmbar').onchange = save;
+  $('chk-defcheck').onchange = save;
+  const setDefBtn = $('btn-settings-set-default');
+  if (setDefBtn) {
+    setDefBtn.onclick = () => invoke('cmd_set_default_browser').catch((err) => alert(String(err)));
+  }
+  $('btn-settings-recheck-default').onclick = () => invoke('cmd_recheck_default_browser');
   $('btn-sleep-all').onclick = () => invoke('cmd_sleep_inactive_tabs');
   $('btn-open-about').onclick = () => {
     invoke('cmd_set_panel', { panel: null });
@@ -741,6 +765,9 @@ $('btn-devtools').onclick = () => invoke('cmd_open_devtools');
 $('btn-theme-toggle').onclick = () => saveSettings({ theme: state.settings.theme === 'light' ? 'dark' : 'light' });
 $('about-open-dm').onclick = () => navigateActive(DOWNLOADS_URL);
 $('about-open-settings').onclick = () => invoke('cmd_set_panel', { panel: 'settings' });
+$('btn-set-default').onclick = () => invoke('cmd_set_default_browser').catch((err) => alert(String(err)));
+$('btn-default-never').onclick = () => invoke('cmd_dismiss_default_banner', { neverAsk: true });
+$('btn-default-close').onclick = () => invoke('cmd_dismiss_default_banner', { neverAsk: false });
 
 $('btn-bookmark').onclick = async () => {
   const tab = activeTab();

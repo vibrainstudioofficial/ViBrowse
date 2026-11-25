@@ -12,6 +12,7 @@ pub const DOWNLOADS_URL: &str = "vibrowse://downloads";
 pub const ABOUT_URL: &str = "vibrowse://about";
 pub const TOP_BAR_BASE_HEIGHT: f64 = 84.0;
 pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
+pub const DEFAULT_BANNER_HEIGHT: f64 = 34.0;
 pub const SIDE_PANEL_WIDTH: f64 = 360.0;
 
 pub fn is_internal_url(url: &str) -> bool {
@@ -100,6 +101,8 @@ pub struct BrowserSnapshot {
     pub active_webviews_count: usize,
     pub estimated_ram_saved_mb: usize,
     pub is_fullscreen: bool,
+    pub is_default_browser: bool,
+    pub show_default_banner: bool,
 }
 
 pub struct InnerState {
@@ -109,6 +112,8 @@ pub struct InnerState {
     pub active_panel: Option<String>,
     pub settings: BrowserSettings,
     pub is_fullscreen: bool,
+    pub is_default_browser: bool,
+    pub show_default_banner: bool,
 }
 
 impl InnerState {
@@ -131,6 +136,8 @@ pub struct AppState {
 impl AppState {
     pub fn new(storage: Storage, app_data_dir: PathBuf) -> Self {
         let settings = storage.load_settings();
+        let is_default = crate::default_browser::is_default_browser();
+        let show_banner = settings.check_default_browser && !is_default;
         Self {
             inner: Mutex::new(InnerState {
                 tabs: Vec::new(),
@@ -139,6 +146,8 @@ impl AppState {
                 active_panel: None,
                 settings,
                 is_fullscreen: false,
+                is_default_browser: is_default,
+                show_default_banner: show_banner,
             }),
             storage,
             adblock: AdBlocker::new(),
@@ -170,16 +179,21 @@ impl AppState {
             active_webviews_count,
             estimated_ram_saved_mb: sleeping_tabs_count * 75,
             is_fullscreen: inner.is_fullscreen,
+            is_default_browser: inner.is_default_browser,
+            show_default_banner: inner.show_default_banner,
         }
     }
 
     pub fn top_bar_height(&self) -> f64 {
         let inner = self.inner.lock().unwrap();
+        let mut h = TOP_BAR_BASE_HEIGHT;
         if inner.settings.show_bookmarks_bar {
-            TOP_BAR_BASE_HEIGHT + BOOKMARKS_BAR_HEIGHT
-        } else {
-            TOP_BAR_BASE_HEIGHT
+            h += BOOKMARKS_BAR_HEIGHT;
         }
+        if inner.show_default_banner {
+            h += DEFAULT_BANNER_HEIGHT;
+        }
+        h
     }
 
     pub fn side_panel_width(&self) -> f64 {
