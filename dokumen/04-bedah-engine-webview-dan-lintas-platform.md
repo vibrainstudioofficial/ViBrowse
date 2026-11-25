@@ -1,4 +1,4 @@
-# 05 — Bedah Mendalam Engine WebView (WebView2, WebKitGTK / `libwebkit2gtk`, CEF) & Arsitektur Lintas Platform
+# 04 — Bedah Mendalam Engine WebView (WebView2, WebKitGTK / `libwebkit2gtk`, CEF) & Arsitektur Lintas Platform
 
 Dokumen ini merangkum diskusi arsitektur mendalam mengenai **cara kerja mesin perender web di balik ViBrowse**, mengapa kita memilih **WebView2** di Windows dan **WebKitGTK (`libwebkit2gtk`)** di Linux ketimbang membawa **Chromium mentah (CEF)**, serta bagaimana kesiapan ViBrowse jika dirilis ke **Windows**, **Linux (`.deb` & `.rpm`)**, dan **Android (`.apk`)**.
 

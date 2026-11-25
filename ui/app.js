@@ -6,34 +6,13 @@ const DOWNLOADS_URL = 'vibrowse://downloads';
 const ABOUT_URL = 'vibrowse://about';
 const IS_PANEL_VIEW = new URLSearchParams(window.location.search).get('view') === 'panel';
 
-if (IS_PANEL_VIEW) {
-  document.body.classList.add('panel-only');
-}
+if (IS_PANEL_VIEW) document.body.classList.add('panel-only');
 
+let state = { tabs: [], active_tab_id: null, active_panel: null, settings: {} };
 let dmTasks = [];
-let dmEngineStatus = { ytdlp_installed: false, torrent_ready: true, download_dir: '' };
+let dmEngineStatus = { ytdlp_installed: false };
 let dmAddMode = 'http';
 let dmFilter = 'all';
-
-let state = {
-  tabs: [],
-  active_tab_id: null,
-  active_panel: null,
-  settings: {
-    search_engine: 'https://www.google.com/search?q=',
-    tab_sleep_minutes: 5,
-    adblock_enabled: true,
-    popup_blocker_enabled: true,
-    show_bookmarks_bar: true,
-    homepage: NEWTAB_URL,
-    theme: 'dark',
-  },
-  adblock_blocked_count: 0,
-  sleeping_tabs_count: 0,
-  active_webviews_count: 0,
-  estimated_ram_saved_mb: 0,
-};
-
 let bookmarksCache = [];
 
 const $ = (id) => document.getElementById(id);
@@ -61,18 +40,42 @@ const ICONS = {
   video: '<rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/>',
   magnet: '<path d="M6 15V7a6 6 0 1 1 12 0v8"/><path d="M6 15h4v4H6z"/><path d="M14 15h4v4h-4z"/>',
   ban: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
-  check: '<polyline points="20 6 9 17 4 12"/>',
   sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
   info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
 };
 
+// ---- HELPERS ----
+
 function iconSvg(name, sizeClass = 'ui-icon-sm', extraClass = '') {
-  const path = ICONS[name] || '';
-  return `<svg class="ui-icon ${sizeClass} ${extraClass}" viewBox="0 0 24 24">${path}</svg>`;
+  return `<svg class="ui-icon ${sizeClass} ${extraClass}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
+}
+
+function createBadge(iconName, sizeClass = 'ui-icon-sm', extraClass = '') {
+  const el = document.createElement('span');
+  el.className = `tab-badge ${extraClass}`.trim();
+  el.innerHTML = iconSvg(iconName, sizeClass);
+  return el;
+}
+
+function isInternal(url) {
+  return typeof url === 'string' && url.startsWith('vibrowse://');
 }
 
 function activeTab() {
-  return state.tabs.find((t) => t.id === state.active_tab_id) || null;
+  return state.tabs.find((tab) => tab.id === state.active_tab_id) || null;
+}
+
+function withTab(fn) {
+  const tab = activeTab();
+  if (tab) fn(tab);
+}
+
+function navigateActive(input) {
+  withTab((tab) => invoke('cmd_navigate', { tabId: tab.id, input }));
+}
+
+function saveSettings(patch) {
+  return invoke('cmd_update_settings', { settings: { ...state.settings, ...patch } });
 }
 
 function escapeHtml(str) {
@@ -108,7 +111,7 @@ function fmtEta(secs) {
   return `${s}d`;
 }
 
-// ---- RENDERING ----
+// ---- CHROME RENDERING ----
 
 function renderTabs() {
   const container = $('tabs-container');
@@ -117,110 +120,65 @@ function renderTabs() {
   for (const tab of state.tabs) {
     const isActive = tab.id === state.active_tab_id;
     const el = document.createElement('div');
-    el.className = 'tab'
-      + (isActive ? ' active' : '')
-      + (tab.is_incognito ? ' incognito' : '')
-      + (tab.is_sleeping ? ' sleeping' : '');
+    el.className = `tab${isActive ? ' active' : ''}${tab.is_incognito ? ' incognito' : ''}${tab.is_sleeping ? ' sleeping' : ''}`;
     el.title = `${tab.title}\n${tab.url}${tab.is_sleeping ? '\n(Sleeping — click to wake)' : ''}`;
 
-    // Icon / spinner
     if (tab.is_loading) {
       const sp = document.createElement('span');
       sp.className = 'tab-spinner';
       el.appendChild(sp);
     } else if (tab.is_incognito) {
-      const b = document.createElement('span');
-      b.className = 'tab-badge incognito-icon';
-      b.innerHTML = iconSvg('incognito', 'ui-icon-sm');
-      el.appendChild(b);
-    } else if (tab.favicon) {
+      el.appendChild(createBadge('incognito', 'ui-icon-sm', 'incognito-icon'));
+    } else if (tab.favicon || tab.url === NEWTAB_URL) {
       const img = document.createElement('img');
       img.className = 'tab-favicon';
-      img.src = tab.favicon;
+      img.src = tab.favicon || 'logo.png';
       img.onerror = () => { img.style.display = 'none'; };
       el.appendChild(img);
-    } else if (tab.url === NEWTAB_URL) {
-      const img = document.createElement('img');
-      img.className = 'tab-favicon';
-      img.src = 'logo.png';
-      el.appendChild(img);
     } else if (tab.url === DOWNLOADS_URL) {
-      const b = document.createElement('span');
-      b.className = 'tab-badge';
-      b.innerHTML = iconSvg('zap', 'ui-icon-sm');
-      el.appendChild(b);
+      el.appendChild(createBadge('zap'));
     } else if (tab.url === ABOUT_URL) {
-      const b = document.createElement('span');
-      b.className = 'tab-badge';
-      b.innerHTML = iconSvg('info', 'ui-icon-sm');
-      el.appendChild(b);
+      el.appendChild(createBadge('info'));
     }
 
-    if (tab.pinned) {
-      const pin = document.createElement('span');
-      pin.className = 'tab-badge pin-icon';
-      pin.innerHTML = iconSvg('pin', 'ui-icon-xs');
-      el.appendChild(pin);
-    }
+    if (tab.pinned) el.appendChild(createBadge('pin', 'ui-icon-xs', 'pin-icon'));
+    if (tab.is_sleeping) el.appendChild(createBadge('sleep', 'ui-icon-xs', 'sleep-icon'));
 
-    if (tab.is_sleeping) {
-      const sl = document.createElement('span');
-      sl.className = 'tab-badge sleep-icon';
-      sl.innerHTML = iconSvg('sleep', 'ui-icon-xs');
-      el.appendChild(sl);
-    }
+    const titleEl = document.createElement('span');
+    titleEl.className = 'tab-title';
+    titleEl.textContent = tab.title || 'New Tab';
+    el.appendChild(titleEl);
 
-    const title = document.createElement('span');
-    title.className = 'tab-title';
-    title.textContent = tab.title || 'New Tab';
-    el.appendChild(title);
-
-    // Quick sleep button on inactive loaded tabs
-    if (!isActive && !tab.is_sleeping && tab.url !== NEWTAB_URL && tab.url !== DOWNLOADS_URL && tab.url !== ABOUT_URL) {
+    if (!isActive && !tab.is_sleeping && !isInternal(tab.url)) {
       const sleepBtn = document.createElement('button');
       sleepBtn.className = 'tab-btn';
       sleepBtn.title = 'Sleep tab to free RAM';
       sleepBtn.innerHTML = iconSvg('sleep', 'ui-icon-xs');
-      sleepBtn.onclick = (e) => {
-        e.stopPropagation();
-        invoke('cmd_sleep_tab', { tabId: tab.id });
-      };
+      sleepBtn.onclick = (e) => { e.stopPropagation(); invoke('cmd_sleep_tab', { tabId: tab.id }); };
       el.appendChild(sleepBtn);
     }
 
-    // Close button
     const closeBtn = document.createElement('button');
     closeBtn.className = 'tab-btn';
     closeBtn.title = 'Close tab (Ctrl+W)';
     closeBtn.innerHTML = iconSvg('close', 'ui-icon-xs');
-    closeBtn.onclick = (e) => {
-      e.stopPropagation();
-      invoke('cmd_close_tab', { tabId: tab.id });
-    };
+    closeBtn.onclick = (e) => { e.stopPropagation(); invoke('cmd_close_tab', { tabId: tab.id }); };
     el.appendChild(closeBtn);
 
     el.onclick = () => invoke('cmd_switch_tab', { tabId: tab.id });
-    el.onauxclick = (e) => {
-      if (e.button === 1) invoke('cmd_close_tab', { tabId: tab.id });
-    };
-    el.oncontextmenu = (e) => {
-      e.preventDefault();
-      invoke('cmd_toggle_pin_tab', { tabId: tab.id });
-    };
-
+    el.onauxclick = (e) => { if (e.button === 1) invoke('cmd_close_tab', { tabId: tab.id }); };
+    el.oncontextmenu = (e) => { e.preventDefault(); invoke('cmd_toggle_pin_tab', { tabId: tab.id }); };
     container.appendChild(el);
   }
 }
 
 function renderToolbar() {
   const tab = activeTab();
-  const toolbar = $('nav-toolbar');
   const omnibox = $('omnibox');
   const secBadge = $('security-badge');
   const bmBtn = $('btn-bookmark');
 
-  toolbar.classList.toggle('incognito-mode', Boolean(tab && tab.is_incognito));
-
+  $('nav-toolbar').classList.toggle('incognito-mode', Boolean(tab && tab.is_incognito));
   if (document.activeElement !== omnibox) {
     omnibox.value = !tab || tab.url === NEWTAB_URL ? '' : tab.url;
   }
@@ -228,18 +186,18 @@ function renderToolbar() {
   secBadge.className = 'security-badge';
   if (tab && tab.is_incognito) {
     secBadge.classList.add('incognito');
-    secBadge.innerHTML = iconSvg('incognito', 'ui-icon-sm');
+    secBadge.innerHTML = iconSvg('incognito');
     secBadge.title = 'Incognito Mode — History is not saved';
   } else if (tab && tab.url.startsWith('https://')) {
     secBadge.classList.add('secure');
-    secBadge.innerHTML = iconSvg('lock', 'ui-icon-sm');
+    secBadge.innerHTML = iconSvg('lock');
     secBadge.title = 'Secure HTTPS connection';
   } else if (tab && tab.url.startsWith('http://')) {
     secBadge.classList.add('warn');
-    secBadge.innerHTML = iconSvg('warn', 'ui-icon-sm');
+    secBadge.innerHTML = iconSvg('warn');
     secBadge.title = 'Not secure (HTTP)';
   } else {
-    secBadge.innerHTML = iconSvg('search', 'ui-icon-sm');
+    secBadge.innerHTML = iconSvg('search');
     secBadge.title = 'Search or enter URL';
   }
 
@@ -247,29 +205,22 @@ function renderToolbar() {
   bmBtn.innerHTML = iconSvg('star', 'ui-icon-sm', isBm ? 'filled' : '');
   bmBtn.classList.toggle('bookmarked', isBm);
 
-  $('adblock-count').textContent = state.adblock_blocked_count;
-  const mediaBtn = $('btn-media-sniffer');
-  const mediaCount = tab && tab.detected_media ? tab.detected_media.length : 0;
-  if (mediaCount > 0) {
-    mediaBtn.classList.remove('hidden');
-    $('media-count').textContent = `${mediaCount} Media`;
-  } else {
-    mediaBtn.classList.add('hidden');
-  }
-  const popupBtn = $('btn-popup-blocked');
-  if (tab && tab.last_blocked_popup) {
-    popupBtn.classList.remove('hidden');
-    popupBtn.title = `Popup diblokir: ${tab.last_blocked_popup} — Klik untuk kelola/buka`;
-  } else {
-    popupBtn.classList.add('hidden');
-  }
-  $('btn-adblock').classList.toggle('active-btn', state.active_panel === 'adblock');
-  $('btn-panel-bookmarks').classList.toggle('active-btn', state.active_panel === 'bookmarks');
-  $('btn-panel-history').classList.toggle('active-btn', state.active_panel === 'history');
-  $('btn-panel-downloads').classList.toggle('active-btn', state.active_panel === 'downloads');
-  $('btn-panel-settings').classList.toggle('active-btn', state.active_panel === 'settings');
+  $('adblock-count').textContent = state.adblock_blocked_count || 0;
 
-  // Theme toggle icon (show Sun in dark mode to switch to light, Moon in light mode to switch to dark)
+  const mediaCount = tab && tab.detected_media ? tab.detected_media.length : 0;
+  $('btn-media-sniffer').classList.toggle('hidden', mediaCount === 0);
+  if (mediaCount > 0) $('media-count').textContent = `${mediaCount} Media`;
+
+  const popupBtn = $('btn-popup-blocked');
+  popupBtn.classList.toggle('hidden', !(tab && tab.last_blocked_popup));
+  if (tab && tab.last_blocked_popup) {
+    popupBtn.title = `Popup diblokir: ${tab.last_blocked_popup} — Klik untuk kelola/buka`;
+  }
+
+  document.querySelectorAll('[data-panel-btn]').forEach((btn) => {
+    btn.classList.toggle('active-btn', state.active_panel === btn.dataset.panelBtn);
+  });
+
   const isLight = state.settings.theme === 'light';
   const themeBtn = $('btn-theme-toggle');
   if (themeBtn) {
@@ -277,100 +228,199 @@ function renderToolbar() {
     themeBtn.title = isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode';
   }
 
-  // RAM Saver pill
-  const pillText = state.sleeping_tabs_count > 0
+  $('ram-pill-text').textContent = state.sleeping_tabs_count > 0
     ? `${state.sleeping_tabs_count} Sleeping • ~${state.estimated_ram_saved_mb}MB saved`
-    : `RAM Saver (${state.active_webviews_count} active)`;
-  $('ram-pill-text').textContent = pillText;
+    : `RAM Saver (${state.active_webviews_count || 0} active)`;
 }
+
+function renderBookmarksBar() {
+  const bar = $('bookmarks-bar');
+  bar.classList.toggle('hidden', !state.settings.show_bookmarks_bar);
+  if (!state.settings.show_bookmarks_bar) return;
+
+  bar.innerHTML = '';
+  for (const bm of bookmarksCache) {
+    const el = document.createElement('button');
+    el.className = 'bm-chip';
+    el.title = bm.url;
+    el.innerHTML = `${iconSvg('star', 'ui-icon-xs')}<span>${escapeHtml(bm.title)}</span>`;
+    el.onclick = () => navigateActive(bm.url);
+    bar.appendChild(el);
+  }
+}
+
+// ---- INTERNAL PAGES ----
 
 function renderNewTabPage() {
   const tab = activeTab();
-  const ntp = $('newtab-page');
   const isIncognito = Boolean(tab && tab.is_incognito);
 
-  ntp.classList.toggle('incognito-ntp', isIncognito);
+  $('newtab-page').classList.toggle('incognito-ntp', isIncognito);
   $('ntp-heading').textContent = isIncognito ? 'ViBrowse Incognito' : 'ViBrowse';
   $('ntp-sub').textContent = isIncognito
     ? 'Private browsing — Cookies & history are not saved'
     : 'Lightweight Rust Browser • Full Chrome Compatibility';
 
-  $('stat-active').textContent = state.active_webviews_count;
-  $('stat-sleeping').textContent = state.sleeping_tabs_count;
-  $('stat-ram').textContent = `${state.estimated_ram_saved_mb} MB`;
-  $('stat-blocked').textContent = state.adblock_blocked_count;
+  $('stat-active').textContent = state.active_webviews_count || 0;
+  $('stat-sleeping').textContent = state.sleeping_tabs_count || 0;
+  $('stat-ram').textContent = `${state.estimated_ram_saved_mb || 0} MB`;
+  $('stat-blocked').textContent = state.adblock_blocked_count || 0;
 
   const dials = $('ntp-dials');
   dials.innerHTML = '';
   for (const bm of bookmarksCache.slice(0, 8)) {
-    const card = document.createElement('div');
-    card.className = 'dial-card';
+    const el = document.createElement('div');
+    el.className = 'dial-card';
     const host = hostOf(bm.url);
-    card.innerHTML = `
+    el.innerHTML = `
       <div class="dial-icon">${escapeHtml((bm.title || host)[0].toUpperCase())}</div>
       <div class="dial-text">
         <div class="dial-title">${escapeHtml(bm.title)}</div>
         <div class="dial-host">${escapeHtml(host)}</div>
       </div>
     `;
-    card.onclick = () => {
-      const t = activeTab();
-      if (t) invoke('cmd_navigate', { tabId: t.id, input: bm.url });
-    };
-    dials.appendChild(card);
+    el.onclick = () => navigateActive(bm.url);
+    dials.appendChild(el);
   }
 }
 
-function renderBookmarksBar() {
-  const bar = $('bookmarks-bar');
-  if (!state.settings.show_bookmarks_bar) {
-    bar.classList.add('hidden');
+function renderInternalPages() {
+  const tab = activeTab();
+  const url = tab ? tab.url : NEWTAB_URL;
+  const isDm = url === DOWNLOADS_URL;
+  const isAbout = url === ABOUT_URL;
+
+  $('downloads-page').classList.toggle('hidden', !isDm);
+  $('about-page').classList.toggle('hidden', !isAbout);
+  $('newtab-page').classList.toggle('hidden', isDm || isAbout);
+
+  if (isAbout) {
+    $('about-theme-val').textContent = state.settings.theme === 'light' ? 'Light Mode' : 'Dark Mode';
+    $('about-blocked-val').textContent = state.adblock_blocked_count || 0;
+    $('about-ram-val').textContent = `${state.estimated_ram_saved_mb || 0} MB`;
+  }
+}
+
+function renderDownloadsDashboard() {
+  renderInternalPages();
+  const tab = activeTab();
+  if (!tab || tab.url !== DOWNLOADS_URL) return;
+
+  const badges = $('dm-engine-badges');
+  badges.innerHTML = `
+    <span class="dm-engine-pill ok">${iconSvg('zap', 'ui-icon-xs')}<span>IDM 16-Conn: Siap</span></span>
+    <span class="dm-engine-pill ok">${iconSvg('magnet', 'ui-icon-xs')}<span>BitTorrent Native: Siap</span></span>
+    ${dmEngineStatus.ytdlp_installed
+      ? `<span class="dm-engine-pill ok">${iconSvg('video', 'ui-icon-xs')}<span>yt-dlp (1000+ Situs): Siap</span></span>`
+      : `<button id="btn-install-ytdlp" class="dm-engine-pill warn">${iconSvg('download', 'ui-icon-xs')}<span>Install yt-dlp (1-Klik)</span></button>`}
+  `;
+
+  const installBtn = $('btn-install-ytdlp');
+  if (installBtn) {
+    installBtn.onclick = async () => {
+      installBtn.textContent = 'Mengunduh yt-dlp...';
+      installBtn.disabled = true;
+      try {
+        await invoke('cmd_dm_install_ytdlp');
+        dmEngineStatus = await invoke('cmd_dm_engine_status');
+        renderDownloadsDashboard();
+      } catch (err) {
+        installBtn.textContent = 'Gagal, Coba Lagi';
+        installBtn.disabled = false;
+        alert(String(err));
+      }
+    };
+  }
+
+  const listEl = $('dm-task-list');
+  const filtered = dmTasks.filter((task) => {
+    if (dmFilter === 'all') return true;
+    if (dmFilter === 'active') return ['downloading', 'queued', 'paused'].includes(task.status);
+    if (dmFilter === 'completed') return task.status === 'completed';
+    return task.kind === dmFilter;
+  });
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<p class="muted">Belum ada tugas unduhan pada kategori ini. Tempel URL file, link YouTube/TikTok, atau Magnet link di atas!</p>';
     return;
   }
-  bar.classList.remove('hidden');
-  bar.innerHTML = '';
-  for (const bm of bookmarksCache) {
-    const btn = document.createElement('button');
-    btn.className = 'bm-chip';
-    btn.title = bm.url;
-    btn.innerHTML = `${iconSvg('star', 'ui-icon-xs')}<span>${escapeHtml(bm.title)}</span>`;
-    btn.onclick = () => {
-      const t = activeTab();
-      if (t) invoke('cmd_navigate', { tabId: t.id, input: bm.url });
-    };
-    bar.appendChild(btn);
+
+  listEl.innerHTML = '';
+  for (const task of filtered) {
+    const pct = task.total_bytes > 0
+      ? Math.min(100, (task.downloaded_bytes / task.total_bytes) * 100)
+      : (task.status === 'completed' ? 100 : 0);
+    const kindIcon = task.kind === 'torrent' ? 'magnet' : (task.kind === 'video' ? 'video' : 'zap');
+    const fillClass = task.status === 'completed' ? 'done' : (task.status === 'failed' ? 'err' : '');
+
+    const el = document.createElement('div');
+    el.className = 'dm-task-card';
+    el.innerHTML = `
+      <div class="dm-task-head">
+        <div class="dm-task-title-wrap">
+          ${iconSvg(kindIcon)}
+          <span class="dm-task-name" title="${escapeHtml(task.url)}">${escapeHtml(task.filename)}</span>
+          <span class="dm-tag">${escapeHtml(task.quality)}</span>
+        </div>
+        <div class="dm-task-actions">
+          ${task.status === 'downloading' ? `<button class="icon-btn" data-a="pause" title="Pause">${iconSvg('pause')}</button>` : ''}
+          ${task.status === 'paused' ? `<button class="icon-btn" data-a="resume" title="Resume">${iconSvg('play')}</button>` : ''}
+          ${['downloading', 'paused', 'queued'].includes(task.status) ? `<button class="icon-btn" data-a="cancel" title="Cancel">${iconSvg('close')}</button>` : ''}
+          ${task.status === 'completed' ? `<button class="icon-btn" data-a="open" title="Buka File">${iconSvg('file')}</button>` : ''}
+          <button class="icon-btn" data-a="folder" title="Buka Folder">${iconSvg('folder')}</button>
+          <button class="icon-btn" data-a="remove" title="Hapus dari Daftar">${iconSvg('trash')}</button>
+        </div>
+      </div>
+      <div class="dm-progress-track">
+        <div class="dm-progress-fill ${fillClass}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <div class="dm-task-meta">
+        <span>${task.status.toUpperCase()} • ${pct.toFixed(1)}% (${fmtBytes(task.downloaded_bytes)} / ${task.total_bytes > 0 ? fmtBytes(task.total_bytes) : '?'})</span>
+        <span>
+          ↓ ${fmtBytes(task.speed_bps)}/s
+          ${task.kind === 'torrent' ? ` • ↑ ${fmtBytes(task.upload_speed_bps)}/s • ${task.peers} peers` : ''}
+          • ETA: ${fmtEta(task.eta_secs)}
+        </span>
+      </div>
+      ${task.error ? `<div class="dm-error">${escapeHtml(task.error)}</div>` : ''}
+    `;
+
+    const bind = (sel, fn) => { const b = el.querySelector(sel); if (b) b.onclick = fn; };
+    bind('[data-a="pause"]', () => invoke('cmd_dm_pause', { id: task.id }));
+    bind('[data-a="resume"]', () => invoke('cmd_dm_resume', { id: task.id }));
+    bind('[data-a="cancel"]', () => invoke('cmd_dm_cancel', { id: task.id }));
+    bind('[data-a="open"]', () => invoke('cmd_open_path', { path: task.save_path, revealInFolder: false }));
+    bind('[data-a="folder"]', () => invoke('cmd_open_path', { path: task.save_path, revealInFolder: true }));
+    bind('[data-a="remove"]', () => invoke('cmd_dm_remove', { id: task.id }));
+    listEl.appendChild(el);
   }
 }
 
-function navigateActive(input) {
-  const t = activeTab();
-  if (t) invoke('cmd_navigate', { tabId: t.id, input });
-}
+// ---- SIDE PANELS ----
 
 async function renderBookmarksPanel(body) {
-  const list = await invoke('cmd_list_bookmarks');
-  bookmarksCache = list;
-  body.innerHTML = list.length === 0
-    ? '<p class="muted">No bookmarks yet. Click ☆ in the address bar to save a page.</p>'
+  bookmarksCache = await invoke('cmd_list_bookmarks');
+  body.innerHTML = bookmarksCache.length === 0
+    ? '<p class="muted">No bookmarks yet. Click the star in the address bar to save a page.</p>'
     : '';
 
-  for (const bm of list) {
-    const row = document.createElement('div');
-    row.className = 'panel-list-item';
-    row.innerHTML = `
+  for (const bm of bookmarksCache) {
+    const el = document.createElement('div');
+    el.className = 'panel-list-item';
+    el.innerHTML = `
       <div class="panel-item-main">
         <div class="panel-item-title">${escapeHtml(bm.title)}</div>
         <div class="panel-item-sub">${escapeHtml(bm.url)}</div>
       </div>
-      <button class="icon-btn" title="Remove">${iconSvg('trash', 'ui-icon-sm')}</button>
+      <button class="icon-btn" title="Remove">${iconSvg('trash')}</button>
     `;
-    row.querySelector('.panel-item-main').onclick = () => navigateActive(bm.url);
-    row.querySelector('button').onclick = async () => {
+    el.querySelector('.panel-item-main').onclick = () => navigateActive(bm.url);
+    el.querySelector('button').onclick = async () => {
       await invoke('cmd_remove_bookmark', { url: bm.url });
       await refreshBookmarks();
       renderSidePanel();
     };
-    body.appendChild(row);
+    body.appendChild(el);
   }
 }
 
@@ -383,52 +433,48 @@ async function renderHistoryPanel(body) {
     <div id="hist-list" class="panel-stack"></div>
   `;
 
-  const loadHist = async (q = '') => {
-    const items = await invoke('cmd_list_history', { query: q });
+  const loadHist = async (query = '') => {
+    const entries = await invoke('cmd_list_history', { query });
     const listEl = $('hist-list');
-    listEl.innerHTML = items.length === 0 ? '<p class="muted">No history entries.</p>' : '';
+    listEl.innerHTML = entries.length === 0 ? '<p class="muted">No history entries.</p>' : '';
 
-    for (const item of items) {
-      const row = document.createElement('div');
-      row.className = 'panel-list-item';
-      row.innerHTML = `
+    for (const entry of entries) {
+      const el = document.createElement('div');
+      el.className = 'panel-list-item';
+      el.innerHTML = `
         <div class="panel-item-main">
-          <div class="panel-item-title">${escapeHtml(item.title)}</div>
-          <div class="panel-item-sub">${escapeHtml(item.url)} • ${item.visit_count}x</div>
+          <div class="panel-item-title">${escapeHtml(entry.title)}</div>
+          <div class="panel-item-sub">${escapeHtml(entry.url)} • ${entry.visit_count}x</div>
         </div>
-        <button class="icon-btn" title="Delete">${iconSvg('close', 'ui-icon-sm')}</button>
+        <button class="icon-btn" title="Delete">${iconSvg('close')}</button>
       `;
-      row.querySelector('.panel-item-main').onclick = () => navigateActive(item.url);
-      row.querySelector('button').onclick = async () => {
-        await invoke('cmd_delete_history_entry', { id: item.id });
+      el.querySelector('.panel-item-main').onclick = () => navigateActive(entry.url);
+      el.querySelector('button').onclick = async () => {
+        await invoke('cmd_delete_history_entry', { id: entry.id });
         loadHist($('hist-search').value);
       };
-      listEl.appendChild(row);
+      listEl.appendChild(el);
     }
   };
 
   $('hist-search').oninput = (e) => loadHist(e.target.value);
-  $('btn-clear-hist').onclick = async () => {
-    await invoke('cmd_clear_history');
-    loadHist('');
-  };
+  $('btn-clear-hist').onclick = async () => { await invoke('cmd_clear_history'); loadHist(''); };
   await loadHist('');
 }
 
 async function renderDownloadsPanel(body) {
   const tab = activeTab();
-  const media = tab && tab.detected_media ? tab.detected_media : [];
-  const tasks = await invoke('cmd_dm_list');
-  dmTasks = tasks;
+  const mediaList = tab && tab.detected_media ? tab.detected_media : [];
+  dmTasks = await invoke('cmd_dm_list');
 
   body.innerHTML = `
     <div class="panel-row">
-      <button id="btn-open-dm-full" class="btn btn-primary btn-with-icon" style="flex:1;">${iconSvg('zap', 'ui-icon-sm')}<span>Buka Dashboard IDM / Torrent</span></button>
+      <button id="btn-open-dm-full" class="btn btn-primary btn-with-icon" style="flex:1;">${iconSvg('zap')}<span>Buka Dashboard IDM / Torrent</span></button>
       <button id="btn-clear-dl" class="btn btn-danger">Clear</button>
     </div>
-    ${media.length > 0 ? `
+    ${mediaList.length > 0 ? `
       <div class="setting-group">
-        <strong class="btn-with-icon">${iconSvg('video', 'ui-icon-sm')}<span>Video / Media Terdeteksi (${media.length})</span></strong>
+        <strong class="btn-with-icon">${iconSvg('video')}<span>Video / Media Terdeteksi (${mediaList.length})</span></strong>
         <div id="sniffer-list" class="panel-stack"></div>
       </div>` : ''}
     <div id="dl-list" class="panel-stack"></div>
@@ -443,172 +489,55 @@ async function renderDownloadsPanel(body) {
     renderSidePanel();
   };
 
-  if (media.length > 0) {
+  if (mediaList.length > 0) {
     const snifferEl = $('sniffer-list');
-    for (const m of media) {
-      const row = document.createElement('div');
-      row.className = 'panel-list-item';
-      const isPlatformOrHls = m.kind === 'platform' || m.kind === 'hls';
-      row.innerHTML = `
+    for (const media of mediaList) {
+      const el = document.createElement('div');
+      el.className = 'panel-list-item';
+      const isStream = media.kind === 'platform' || media.kind === 'hls';
+      el.innerHTML = `
         <div class="panel-item-main">
-          <div class="panel-item-title btn-with-icon">${iconSvg('video', 'ui-icon-xs')}<span>${escapeHtml(m.filename)}</span></div>
-          <div class="panel-item-sub">${escapeHtml(m.kind.toUpperCase())} • ${escapeHtml(m.url)}</div>
+          <div class="panel-item-title btn-with-icon">${iconSvg('video', 'ui-icon-xs')}<span>${escapeHtml(media.filename)}</span></div>
+          <div class="panel-item-sub">${escapeHtml(media.kind.toUpperCase())} • ${escapeHtml(media.url)}</div>
         </div>
         <button class="btn btn-primary btn-with-icon" title="Download">${iconSvg('download', 'ui-icon-xs')}</button>
       `;
-      row.querySelector('button').onclick = async () => {
+      el.querySelector('button').onclick = async () => {
         try {
-          if (isPlatformOrHls) {
-            await invoke('cmd_dm_start_video', { url: m.url, quality: 'best' });
+          if (isStream) {
+            await invoke('cmd_dm_start_video', { url: media.url, quality: 'best' });
           } else {
-            await invoke('cmd_dm_start_http', { url: m.url, connections: 8, filename: m.filename });
+            await invoke('cmd_dm_start_http', { url: media.url, connections: 8, filename: media.filename });
           }
           renderSidePanel();
         } catch (err) {
           alert(String(err));
         }
       };
-      snifferEl.appendChild(row);
+      snifferEl.appendChild(el);
     }
   }
 
   const listEl = $('dl-list');
-  if (tasks.length === 0) {
+  if (dmTasks.length === 0) {
     listEl.innerHTML = '<p class="muted">Belum ada unduhan. Klik tombol di atas untuk membuka Dashboard IDM / YouTube / Torrent.</p>';
     return;
   }
 
-  for (const dl of tasks) {
-    const pct = dl.total_bytes > 0 ? Math.min(100, Math.round((dl.downloaded_bytes / dl.total_bytes) * 100)) : 0;
-    const row = document.createElement('div');
-    row.className = 'panel-list-item';
-    row.innerHTML = `
+  for (const task of dmTasks) {
+    const pct = task.total_bytes > 0 ? Math.min(100, Math.round((task.downloaded_bytes / task.total_bytes) * 100)) : 0;
+    const el = document.createElement('div');
+    el.className = 'panel-list-item';
+    el.innerHTML = `
       <div class="panel-item-main">
-        <div class="panel-item-title">${escapeHtml(dl.filename)}</div>
-        <div class="panel-item-sub">${dl.status.toUpperCase()} • ${pct}% • ${fmtBytes(dl.speed_bps)}/s</div>
+        <div class="panel-item-title">${escapeHtml(task.filename)}</div>
+        <div class="panel-item-sub">${task.status.toUpperCase()} • ${pct}% • ${fmtBytes(task.speed_bps)}/s</div>
       </div>
-      <button class="icon-btn" data-act="folder" title="Show in folder">${iconSvg('folder', 'ui-icon-sm')}</button>
+      <button class="icon-btn" data-act="folder" title="Show in folder">${iconSvg('folder')}</button>
     `;
-    row.querySelector('[data-act="folder"]').onclick = () =>
-      invoke('cmd_open_path', { path: dl.save_path, revealInFolder: true });
-    listEl.appendChild(row);
-  }
-}
-
-function renderInternalPages() {
-  const tab = activeTab();
-  const url = tab ? tab.url : NEWTAB_URL;
-  const isDmPage = url === DOWNLOADS_URL;
-  const isAboutPage = url === ABOUT_URL;
-
-  $('downloads-page').classList.toggle('hidden', !isDmPage);
-  $('about-page').classList.toggle('hidden', !isAboutPage);
-  $('newtab-page').classList.toggle('hidden', isDmPage || isAboutPage);
-
-  if (isAboutPage) {
-    $('about-theme-val').textContent = state.settings.theme === 'light' ? 'Light Mode' : 'Dark Mode';
-    $('about-blocked-val').textContent = state.adblock_blocked_count;
-    $('about-ram-val').textContent = `${state.estimated_ram_saved_mb} MB`;
-  }
-}
-
-function renderDownloadsDashboard() {
-  renderInternalPages();
-  const tab = activeTab();
-  if (!tab || tab.url !== DOWNLOADS_URL) return;
-
-  // Engine status badges
-  const badges = $('dm-engine-badges');
-  badges.innerHTML = `
-    <span class="dm-engine-pill ok">${iconSvg('zap', 'ui-icon-xs')}<span>IDM 16-Conn: Siap</span></span>
-    <span class="dm-engine-pill ok">${iconSvg('magnet', 'ui-icon-xs')}<span>BitTorrent Native: Siap</span></span>
-    ${dmEngineStatus.ytdlp_installed
-      ? `<span class="dm-engine-pill ok">${iconSvg('video', 'ui-icon-xs')}<span>yt-dlp (1000+ Situs): Siap</span></span>`
-      : `<button id="btn-install-ytdlp" class="dm-engine-pill warn">${iconSvg('download', 'ui-icon-xs')}<span>Install yt-dlp (1-Klik)</span></button>`}
-  `;
-  const installBtn = $('btn-install-ytdlp');
-  if (installBtn) {
-    installBtn.onclick = async () => {
-      installBtn.textContent = '⏳ Mengunduh yt-dlp...';
-      installBtn.disabled = true;
-      try {
-        await invoke('cmd_dm_install_ytdlp');
-        dmEngineStatus = await invoke('cmd_dm_engine_status');
-        renderDownloadsDashboard();
-      } catch (err) {
-        installBtn.textContent = '⚠ Gagal, Coba Lagi';
-        installBtn.disabled = false;
-        alert(String(err));
-      }
-    };
-  }
-
-  // Task list
-  const listEl = $('dm-task-list');
-  const filtered = dmTasks.filter((t) => {
-    if (dmFilter === 'all') return true;
-    if (dmFilter === 'active') return ['downloading', 'queued', 'paused'].includes(t.status);
-    if (dmFilter === 'completed') return t.status === 'completed';
-    return t.kind === dmFilter;
-  });
-
-  if (filtered.length === 0) {
-    listEl.innerHTML = '<p class="muted">Belum ada tugas unduhan pada kategori ini. Tempel URL file, link YouTube/TikTok, atau Magnet link di atas!</p>';
-    return;
-  }
-
-  listEl.innerHTML = '';
-  for (const t of filtered) {
-    const pct = t.total_bytes > 0
-      ? Math.min(100, (t.downloaded_bytes / t.total_bytes) * 100)
-      : (t.status === 'completed' ? 100 : 0);
-    const icon = iconSvg(t.kind === 'torrent' ? 'magnet' : (t.kind === 'video' ? 'video' : 'zap'), 'ui-icon-sm');
-    const fillClass = t.status === 'completed' ? 'done' : (t.status === 'failed' ? 'err' : '');
-
-    const card = document.createElement('div');
-    card.className = 'dm-task-card';
-    card.innerHTML = `
-      <div class="dm-task-head">
-        <div class="dm-task-title-wrap">
-          ${icon}
-          <span class="dm-task-name" title="${escapeHtml(t.url)}">${escapeHtml(t.filename)}</span>
-          <span class="dm-tag">${escapeHtml(t.quality)}</span>
-        </div>
-        <div class="dm-task-actions">
-          ${t.status === 'downloading' ? `<button class="icon-btn" data-a="pause" title="Pause">${iconSvg('pause', 'ui-icon-sm')}</button>` : ''}
-          ${t.status === 'paused' ? `<button class="icon-btn" data-a="resume" title="Resume">${iconSvg('play', 'ui-icon-sm')}</button>` : ''}
-          ${['downloading', 'paused', 'queued'].includes(t.status) ? `<button class="icon-btn" data-a="cancel" title="Cancel">${iconSvg('close', 'ui-icon-sm')}</button>` : ''}
-          ${t.status === 'completed' ? `<button class="icon-btn" data-a="open" title="Buka File">${iconSvg('file', 'ui-icon-sm')}</button>` : ''}
-          <button class="icon-btn" data-a="folder" title="Buka Folder">${iconSvg('folder', 'ui-icon-sm')}</button>
-          <button class="icon-btn" data-a="remove" title="Hapus dari Daftar">${iconSvg('trash', 'ui-icon-sm')}</button>
-        </div>
-      </div>
-      <div class="dm-progress-track">
-        <div class="dm-progress-fill ${fillClass}" style="width:${pct.toFixed(1)}%"></div>
-      </div>
-      <div class="dm-task-meta">
-        <span>${t.status.toUpperCase()} • ${pct.toFixed(1)}% (${fmtBytes(t.downloaded_bytes)} / ${t.total_bytes > 0 ? fmtBytes(t.total_bytes) : '?'})</span>
-        <span>
-          ↓ ${fmtBytes(t.speed_bps)}/s
-          ${t.kind === 'torrent' ? ` • ↑ ${fmtBytes(t.upload_speed_bps)}/s • ${t.peers} peers` : ''}
-          • ETA: ${fmtEta(t.eta_secs)}
-        </span>
-      </div>
-      ${t.error ? `<div class="dm-error">${escapeHtml(t.error)}</div>` : ''}
-    `;
-
-    const bind = (sel, fn) => {
-      const b = card.querySelector(sel);
-      if (b) b.onclick = fn;
-    };
-    bind('[data-a="pause"]', () => invoke('cmd_dm_pause', { id: t.id }));
-    bind('[data-a="resume"]', () => invoke('cmd_dm_resume', { id: t.id }));
-    bind('[data-a="cancel"]', () => invoke('cmd_dm_cancel', { id: t.id }));
-    bind('[data-a="open"]', () => invoke('cmd_open_path', { path: t.save_path, revealInFolder: false }));
-    bind('[data-a="folder"]', () => invoke('cmd_open_path', { path: t.save_path, revealInFolder: true }));
-    bind('[data-a="remove"]', () => invoke('cmd_dm_remove', { id: t.id }));
-
-    listEl.appendChild(card);
+    el.querySelector('[data-act="folder"]').onclick = () =>
+      invoke('cmd_open_path', { path: task.save_path, revealInFolder: true });
+    listEl.appendChild(el);
   }
 }
 
@@ -622,27 +551,21 @@ async function renderAdblockPanel(body) {
   body.innerHTML = `
     <div class="setting-group">
       <div class="setting-row">
-        <div>
-          <strong>Ad &amp; Tracker Blocker</strong>
-          <div class="muted">Blokir script iklan, iframe, tracker &amp; banner</div>
-        </div>
+        <div><strong>Ad &amp; Tracker Blocker</strong><div class="muted">Blokir script iklan, iframe, tracker &amp; banner</div></div>
         <input id="chk-adblock" type="checkbox" ${state.settings.adblock_enabled ? 'checked' : ''} />
       </div>
       <div class="setting-row">
-        <div>
-          <strong>Smart Popup Blocker</strong>
-          <div class="muted">Blokir iklan tab baru / pop-under lintas domain</div>
-        </div>
+        <div><strong>Smart Popup Blocker</strong><div class="muted">Blokir iklan tab baru / pop-under lintas domain</div></div>
         <input id="chk-popup" type="checkbox" ${state.settings.popup_blocker_enabled !== false ? 'checked' : ''} />
       </div>
     </div>
     <div class="setting-group">
-      <div class="stat-value accent-purple">${state.adblock_blocked_count}</div>
+      <div class="stat-value accent-purple">${state.adblock_blocked_count || 0}</div>
       <div class="muted">Iklan, tracker &amp; popup diblokir sesi ini</div>
     </div>
     ${blockedPopup ? `
     <div class="setting-group">
-      <strong class="btn-with-icon">${iconSvg('ban', 'ui-icon-sm')}<span>Popup Terakhir Diblokir</span></strong>
+      <strong class="btn-with-icon">${iconSvg('ban')}<span>Popup Terakhir Diblokir</span></strong>
       <div class="panel-item-sub">${escapeHtml(blockedPopup)}</div>
       <div class="panel-row">
         <button id="btn-open-popup-once" class="btn">Buka Sekali</button>
@@ -663,29 +586,15 @@ async function renderAdblockPanel(body) {
     </div>` : ''}
   `;
 
-  $('chk-adblock').onchange = async (e) => {
-    const next = { ...state.settings, adblock_enabled: e.target.checked };
-    await invoke('cmd_update_settings', { settings: next });
-  };
-  $('chk-popup').onchange = async (e) => {
-    const next = { ...state.settings, popup_blocker_enabled: e.target.checked };
-    await invoke('cmd_update_settings', { settings: next });
-  };
+  $('chk-adblock').onchange = (e) => saveSettings({ adblock_enabled: e.target.checked });
+  $('chk-popup').onchange = (e) => saveSettings({ popup_blocker_enabled: e.target.checked });
   if (blockedPopup && tab) {
-    $('btn-open-popup-once').onclick = () =>
-      invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: false });
-    $('btn-allow-popup-open').onclick = () =>
-      invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: true });
+    $('btn-open-popup-once').onclick = () => invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: false });
+    $('btn-allow-popup-open').onclick = () => invoke('cmd_open_blocked_popup', { tabId: tab.id, alwaysAllowSite: true });
   }
   if (host) {
-    $('btn-site-allow').onclick = async () => {
-      await invoke('cmd_toggle_adblock_site', { host });
-      renderSidePanel();
-    };
-    $('btn-popup-site-allow').onclick = async () => {
-      await invoke('cmd_toggle_popup_site', { host });
-      renderSidePanel();
-    };
+    $('btn-site-allow').onclick = async () => { await invoke('cmd_toggle_adblock_site', { host }); renderSidePanel(); };
+    $('btn-popup-site-allow').onclick = async () => { await invoke('cmd_toggle_popup_site', { host }); renderSidePanel(); };
   }
 }
 
@@ -723,13 +632,11 @@ function renderSettingsPanel(body) {
         <input id="chk-bmbar" type="checkbox" ${state.settings.show_bookmarks_bar ? 'checked' : ''} />
       </div>
     </div>
-
     <div class="setting-group">
-      <strong>RAM Saver Actions</strong>
-      <button id="btn-sleep-all" class="btn btn-primary btn-with-icon">${iconSvg('sleep', 'ui-icon-sm')}<span>Sleep All Inactive Tabs Now</span></button>
-      <button id="btn-open-about" class="btn btn-with-icon">${iconSvg('info', 'ui-icon-sm')}<span>About ViBrowse</span></button>
+      <strong>Actions</strong>
+      <button id="btn-sleep-all" class="btn btn-primary btn-with-icon">${iconSvg('sleep')}<span>Sleep All Inactive Tabs Now</span></button>
+      <button id="btn-open-about" class="btn btn-with-icon">${iconSvg('info')}<span>About ViBrowse</span></button>
     </div>
-
     <div class="setting-group">
       <strong>Chrome Keyboard Shortcuts</strong>
       <div class="shortcut-grid">
@@ -754,16 +661,12 @@ function renderSettingsPanel(body) {
   $('sel-search').value = state.settings.search_engine;
   $('sel-sleep').value = String(state.settings.tab_sleep_minutes);
 
-  const save = async () => {
-    const next = {
-      ...state.settings,
-      theme: $('sel-theme').value,
-      search_engine: $('sel-search').value,
-      tab_sleep_minutes: Number($('sel-sleep').value),
-      show_bookmarks_bar: $('chk-bmbar').checked,
-    };
-    await invoke('cmd_update_settings', { settings: next });
-  };
+  const save = () => saveSettings({
+    theme: $('sel-theme').value,
+    search_engine: $('sel-search').value,
+    tab_sleep_minutes: Number($('sel-sleep').value),
+    show_bookmarks_bar: $('chk-bmbar').checked,
+  });
   $('sel-theme').onchange = save;
   $('sel-search').onchange = save;
   $('sel-sleep').onchange = save;
@@ -801,13 +704,8 @@ async function refreshBookmarks() {
   renderNewTabPage();
 }
 
-function applyTheme() {
-  const theme = state.settings && state.settings.theme === 'light' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = theme;
-}
-
 function renderAll() {
-  applyTheme();
+  document.documentElement.dataset.theme = state.settings.theme === 'light' ? 'light' : 'dark';
   if (IS_PANEL_VIEW) {
     renderSidePanel();
     return;
@@ -825,39 +723,27 @@ function renderAll() {
 $('btn-new-tab').onclick = () => invoke('cmd_new_tab', { url: null, incognito: false });
 $('btn-new-incognito').onclick = () => invoke('cmd_new_tab', { url: null, incognito: true });
 $('ram-pill').onclick = () => invoke('cmd_sleep_inactive_tabs');
-
-$('btn-back').onclick = () => {
-  const t = activeTab();
-  if (t) invoke('cmd_tab_back', { tabId: t.id });
-};
-$('btn-forward').onclick = () => {
-  const t = activeTab();
-  if (t) invoke('cmd_tab_forward', { tabId: t.id });
-};
-$('btn-reload').onclick = () => {
-  const t = activeTab();
-  if (t) invoke('cmd_tab_reload', { tabId: t.id });
-};
-$('btn-home').onclick = () => {
-  const t = activeTab();
-  if (t) invoke('cmd_navigate', { tabId: t.id, input: NEWTAB_URL });
-};
+$('btn-back').onclick = () => withTab((tab) => invoke('cmd_tab_back', { tabId: tab.id }));
+$('btn-forward').onclick = () => withTab((tab) => invoke('cmd_tab_forward', { tabId: tab.id }));
+$('btn-reload').onclick = () => withTab((tab) => invoke('cmd_tab_reload', { tabId: tab.id }));
+$('btn-home').onclick = () => navigateActive(NEWTAB_URL);
+$('btn-close-panel').onclick = () => invoke('cmd_set_panel', { panel: null });
+$('btn-devtools').onclick = () => invoke('cmd_open_devtools');
+$('btn-theme-toggle').onclick = () => saveSettings({ theme: state.settings.theme === 'light' ? 'dark' : 'light' });
+$('about-open-dm').onclick = () => navigateActive(DOWNLOADS_URL);
+$('about-open-settings').onclick = () => invoke('cmd_set_panel', { panel: 'settings' });
 
 $('btn-bookmark').onclick = async () => {
-  const t = activeTab();
-  if (!t || t.url === NEWTAB_URL) return;
-  await invoke('cmd_toggle_bookmark', { title: t.title || t.url, url: t.url });
+  const tab = activeTab();
+  if (!tab || isInternal(tab.url)) return;
+  await invoke('cmd_toggle_bookmark', { title: tab.title || tab.url, url: tab.url });
   await refreshBookmarks();
 };
 
-$('btn-media-sniffer').onclick = () => invoke('cmd_set_panel', { panel: 'downloads' });
-$('btn-popup-blocked').onclick = () => invoke('cmd_set_panel', { panel: 'adblock' });
-$('btn-adblock').onclick = () => invoke('cmd_set_panel', { panel: 'adblock' });
-$('btn-panel-bookmarks').onclick = () => invoke('cmd_set_panel', { panel: 'bookmarks' });
-$('btn-panel-history').onclick = () => invoke('cmd_set_panel', { panel: 'history' });
-$('btn-panel-downloads').onclick = () => invoke('cmd_set_panel', { panel: 'downloads' });
+document.querySelectorAll('[data-panel]').forEach((btn) => {
+  btn.onclick = () => invoke('cmd_set_panel', { panel: btn.dataset.panel });
+});
 
-// Download Manager dashboard controls
 document.querySelectorAll('.dm-mode-btn').forEach((btn) => {
   btn.onclick = () => {
     dmAddMode = btn.dataset.mode;
@@ -885,17 +771,12 @@ $('dm-add-form').onsubmit = async (e) => {
   if (!url) return;
 
   try {
-    // Auto-detect magnet links regardless of selected tab
     if (url.startsWith('magnet:') || url.toLowerCase().endsWith('.torrent') || dmAddMode === 'torrent') {
       await invoke('cmd_dm_start_torrent', { magnetOrUrl: url });
     } else if (dmAddMode === 'video') {
       await invoke('cmd_dm_start_video', { url, quality: $('dm-quality-select').value });
     } else {
-      await invoke('cmd_dm_start_http', {
-        url,
-        connections: Number($('dm-conns-select').value),
-        filename: null,
-      });
+      await invoke('cmd_dm_start_http', { url, connections: Number($('dm-conns-select').value), filename: null });
     }
     $('dm-url-input').value = '';
   } catch (err) {
@@ -903,18 +784,6 @@ $('dm-add-form').onsubmit = async (e) => {
     errEl.classList.remove('hidden');
   }
 };
-$('btn-panel-settings').onclick = () => invoke('cmd_set_panel', { panel: 'settings' });
-$('btn-close-panel').onclick = () => invoke('cmd_set_panel', { panel: null });
-$('btn-devtools').onclick = () => invoke('cmd_open_devtools');
-$('btn-theme-toggle').onclick = () => {
-  const nextTheme = state.settings.theme === 'light' ? 'dark' : 'light';
-  invoke('cmd_update_settings', { settings: { ...state.settings, theme: nextTheme } });
-};
-$('about-open-dm').onclick = () => {
-  const t = activeTab();
-  if (t) invoke('cmd_navigate', { tabId: t.id, input: DOWNLOADS_URL });
-};
-$('about-open-settings').onclick = () => invoke('cmd_set_panel', { panel: 'settings' });
 
 // Omnibox navigation & autocomplete
 const omnibox = $('omnibox');
@@ -922,149 +791,100 @@ const dropdown = $('omnibox-dropdown');
 
 omnibox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    const t = activeTab();
-    if (t) {
-      dropdown.classList.add('hidden');
-      invoke('cmd_navigate', { tabId: t.id, input: omnibox.value });
-      omnibox.blur();
-    }
+    dropdown.classList.add('hidden');
+    navigateActive(omnibox.value);
+    omnibox.blur();
   } else if (e.key === 'Escape') {
     dropdown.classList.add('hidden');
     omnibox.blur();
   }
 });
-
 omnibox.addEventListener('focus', () => omnibox.select());
-omnibox.addEventListener('blur', () => {
-  setTimeout(() => dropdown.classList.add('hidden'), 160);
-});
+omnibox.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 160));
 
 omnibox.addEventListener('input', async () => {
-  const q = omnibox.value.trim();
-  const t = activeTab();
-  // Show dropdown cleanly on New Tab Page where chrome UI is unobstructed
-  if (!q || (t && t.url !== NEWTAB_URL)) {
+  const query = omnibox.value.trim();
+  const tab = activeTab();
+  if (!query || (tab && tab.url !== NEWTAB_URL)) {
     dropdown.classList.add('hidden');
     return;
   }
-  const items = await invoke('cmd_search_omnibox', { query: q });
+  const items = await invoke('cmd_search_omnibox', { query });
   if (!items.length) {
     dropdown.classList.add('hidden');
     return;
   }
   dropdown.innerHTML = '';
   for (const item of items) {
-    const row = document.createElement('div');
-    row.className = 'suggest-item';
-    row.innerHTML = `
-      ${iconSvg(item.kind === 'bookmark' ? 'star' : 'history', 'ui-icon-sm')}
+    const el = document.createElement('div');
+    el.className = 'suggest-item';
+    el.innerHTML = `
+      ${iconSvg(item.kind === 'bookmark' ? 'star' : 'history')}
       <div class="suggest-text">
         <div class="suggest-title">${escapeHtml(item.title)}</div>
         <div class="suggest-url">${escapeHtml(item.url)}</div>
       </div>
     `;
-    row.onmousedown = () => {
-      if (t) invoke('cmd_navigate', { tabId: t.id, input: item.url });
-      dropdown.classList.add('hidden');
-    };
-    dropdown.appendChild(row);
+    el.onmousedown = () => { navigateActive(item.url); dropdown.classList.add('hidden'); };
+    dropdown.appendChild(el);
   }
   dropdown.classList.remove('hidden');
 });
 
-// New Tab Page search form
 $('ntp-search-form').onsubmit = (e) => {
   e.preventDefault();
-  const q = $('ntp-search-input').value.trim();
-  const t = activeTab();
-  if (q && t) {
-    invoke('cmd_navigate', { tabId: t.id, input: q });
+  const query = $('ntp-search-input').value.trim();
+  if (query) {
+    navigateActive(query);
     $('ntp-search-input').value = '';
   }
 };
 
 // ---- CHROME KEYBOARD SHORTCUTS ----
-window.addEventListener('keydown', (e) => {
-  const ctrl = e.ctrlKey || e.metaKey;
-  const k = e.key.toLowerCase();
-  const t = activeTab();
-
-  if (ctrl && !e.shiftKey && k === 't') {
-    e.preventDefault();
-    invoke('cmd_new_tab', { url: null, incognito: false });
-  } else if (ctrl && e.shiftKey && k === 'n') {
-    e.preventDefault();
-    invoke('cmd_new_tab', { url: null, incognito: true });
-  } else if (ctrl && !e.shiftKey && k === 'w') {
-    e.preventDefault();
-    if (t) invoke('cmd_close_tab', { tabId: t.id });
-  } else if (ctrl && e.shiftKey && k === 't') {
-    e.preventDefault();
-    invoke('cmd_reopen_closed_tab');
-  } else if ((ctrl && k === 'l') || (e.altKey && k === 'd')) {
-    e.preventDefault();
-    omnibox.focus();
-    omnibox.select();
-  } else if ((ctrl && k === 'r') || e.key === 'F5') {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_reload', { tabId: t.id });
-  } else if (e.altKey && e.key === 'ArrowLeft') {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_back', { tabId: t.id });
-  } else if (e.altKey && e.key === 'ArrowRight') {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_forward', { tabId: t.id });
-  } else if (ctrl && !e.shiftKey && k === 'd') {
-    e.preventDefault();
-    $('btn-bookmark').click();
-  } else if (ctrl && !e.shiftKey && k === 'h') {
-    e.preventDefault();
-    invoke('cmd_set_panel', { panel: 'history' });
-  } else if (ctrl && !e.shiftKey && k === 'j') {
-    e.preventDefault();
-    invoke('cmd_set_panel', { panel: 'downloads' });
-  } else if (ctrl && e.shiftKey && k === 'b') {
-    e.preventDefault();
-    const next = { ...state.settings, show_bookmarks_bar: !state.settings.show_bookmarks_bar };
-    invoke('cmd_update_settings', { settings: next });
-  } else if (e.key === 'F11') {
-    e.preventDefault();
-    invoke('cmd_toggle_fullscreen');
-  } else if (e.key === 'F12' || (ctrl && e.shiftKey && k === 'i')) {
-    e.preventDefault();
-    invoke('cmd_open_devtools');
-  } else if (ctrl && (e.key === '=' || e.key === '+')) {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_zoom', { tabId: t.id, delta: 0.1, reset: false });
-  } else if (ctrl && e.key === '-') {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_zoom', { tabId: t.id, delta: -0.1, reset: false });
-  } else if (ctrl && e.key === '0') {
-    e.preventDefault();
-    if (t) invoke('cmd_tab_zoom', { tabId: t.id, delta: 0.0, reset: true });
-  } else if (ctrl && e.key === 'Tab') {
-    e.preventDefault();
-    if (state.tabs.length > 1 && t) {
-      const idx = state.tabs.findIndex((x) => x.id === t.id);
-      const nextIdx = e.shiftKey
-        ? (idx - 1 + state.tabs.length) % state.tabs.length
-        : (idx + 1) % state.tabs.length;
-      invoke('cmd_switch_tab', { tabId: state.tabs[nextIdx].id });
-    }
-  } else if (ctrl && /^[1-9]$/.test(e.key)) {
-    e.preventDefault();
+const SHORTCUTS = [
+  [(e, c, k) => c && !e.shiftKey && k === 't', () => invoke('cmd_new_tab', { url: null, incognito: false })],
+  [(e, c, k) => c && e.shiftKey && k === 'n', () => invoke('cmd_new_tab', { url: null, incognito: true })],
+  [(e, c, k) => c && !e.shiftKey && k === 'w', () => withTab((tab) => invoke('cmd_close_tab', { tabId: tab.id }))],
+  [(e, c, k) => c && e.shiftKey && k === 't', () => invoke('cmd_reopen_closed_tab')],
+  [(e, c, k) => (c && k === 'l') || (e.altKey && k === 'd'), () => { omnibox.focus(); omnibox.select(); }],
+  [(e, c, k) => (c && k === 'r') || e.key === 'F5', () => withTab((tab) => invoke('cmd_tab_reload', { tabId: tab.id }))],
+  [(e) => e.altKey && e.key === 'ArrowLeft', () => withTab((tab) => invoke('cmd_tab_back', { tabId: tab.id }))],
+  [(e) => e.altKey && e.key === 'ArrowRight', () => withTab((tab) => invoke('cmd_tab_forward', { tabId: tab.id }))],
+  [(e, c, k) => c && !e.shiftKey && k === 'd', () => $('btn-bookmark').click()],
+  [(e, c, k) => c && !e.shiftKey && k === 'h', () => invoke('cmd_set_panel', { panel: 'history' })],
+  [(e, c, k) => c && !e.shiftKey && k === 'j', () => invoke('cmd_set_panel', { panel: 'downloads' })],
+  [(e, c, k) => c && e.shiftKey && k === 'b', () => saveSettings({ show_bookmarks_bar: !state.settings.show_bookmarks_bar })],
+  [(e) => e.key === 'F11', () => invoke('cmd_toggle_fullscreen')],
+  [(e, c, k) => e.key === 'F12' || (c && e.shiftKey && k === 'i'), () => invoke('cmd_open_devtools')],
+  [(e, c) => c && (e.key === '=' || e.key === '+'), () => withTab((tab) => invoke('cmd_tab_zoom', { tabId: tab.id, delta: 0.1, reset: false }))],
+  [(e, c) => c && e.key === '-', () => withTab((tab) => invoke('cmd_tab_zoom', { tabId: tab.id, delta: -0.1, reset: false }))],
+  [(e, c) => c && e.key === '0', () => withTab((tab) => invoke('cmd_tab_zoom', { tabId: tab.id, delta: 0.0, reset: true }))],
+  [(e, c) => c && e.key === 'Tab', (e) => withTab((tab) => {
+    if (state.tabs.length < 2) return;
+    const idx = state.tabs.findIndex((x) => x.id === tab.id);
+    const nextIdx = (idx + (e.shiftKey ? -1 : 1) + state.tabs.length) % state.tabs.length;
+    invoke('cmd_switch_tab', { tabId: state.tabs[nextIdx].id });
+  })],
+  [(e, c) => c && /^[1-9]$/.test(e.key), (e) => {
     const n = Number(e.key);
     const target = n === 9 ? state.tabs[state.tabs.length - 1] : state.tabs[n - 1];
     if (target) invoke('cmd_switch_tab', { tabId: target.id });
+  }],
+];
+
+window.addEventListener('keydown', (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  const match = SHORTCUTS.find(([pred]) => pred(e, ctrl, key));
+  if (match) {
+    e.preventDefault();
+    match[1](e);
   }
 });
 
-// ---- INIT & LISTENERS ----
+// ---- INIT ----
 async function init() {
-  await listen('browser-state', (ev) => {
-    state = ev.payload;
-    renderAll();
-  });
+  await listen('browser-state', (ev) => { state = ev.payload; renderAll(); });
   await listen('dm-updated', (ev) => {
     dmTasks = ev.payload;
     if (!IS_PANEL_VIEW) renderDownloadsDashboard();

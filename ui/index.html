@@ -64,25 +64,25 @@
         </div>
 
         <div class="nav-group">
-          <button id="btn-media-sniffer" class="tool-btn media-pill hidden" title="Video / Media detected on this page — Click to download">
+          <button id="btn-media-sniffer" data-panel="downloads" class="tool-btn media-pill hidden" title="Video / Media detected on this page — Click to download">
             <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
             <span id="media-count">0</span>
           </button>
-          <button id="btn-popup-blocked" class="tool-btn popup-pill hidden" title="Popup blocked on this page">
+          <button id="btn-popup-blocked" data-panel="adblock" class="tool-btn popup-pill hidden" title="Popup blocked on this page">
             <svg class="ui-icon ui-icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
             <span>Popup</span>
           </button>
-          <button id="btn-adblock" class="tool-btn" title="Ad &amp; Popup Blocker">
+          <button id="btn-adblock" data-panel="adblock" data-panel-btn="adblock" class="tool-btn" title="Ad &amp; Popup Blocker">
             <svg class="ui-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <span id="adblock-count" class="badge">0</span>
           </button>
-          <button id="btn-panel-bookmarks" class="icon-btn" title="Bookmarks">
+          <button id="btn-panel-bookmarks" data-panel="bookmarks" data-panel-btn="bookmarks" class="icon-btn" title="Bookmarks">
             <svg class="ui-icon" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
           </button>
-          <button id="btn-panel-history" class="icon-btn" title="History (Ctrl+H)">
+          <button id="btn-panel-history" data-panel="history" data-panel-btn="history" class="icon-btn" title="History (Ctrl+H)">
             <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
           </button>
-          <button id="btn-panel-downloads" class="icon-btn" title="Downloads (Ctrl+J)">
+          <button id="btn-panel-downloads" data-panel="downloads" data-panel-btn="downloads" class="icon-btn" title="Downloads (Ctrl+J)">
             <svg class="ui-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
           <button id="btn-devtools" class="icon-btn" title="DevTools (F12)">
@@ -91,7 +91,7 @@
           <button id="btn-theme-toggle" class="icon-btn" title="Switch Light / Dark Mode">
             <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           </button>
-          <button id="btn-panel-settings" class="icon-btn" title="Settings">
+          <button id="btn-panel-settings" data-panel="settings" data-panel-btn="settings" class="icon-btn" title="Settings">
             <svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.25.4-1.51 1z"/></svg>
           </button>
         </div>
@@ -231,7 +231,7 @@
             <div>
               <div class="about-title-row">
                 <h1>ViBrowse</h1>
-                <span class="about-version">V1.1.a</span>
+                <span class="about-version">V1.2a</span>
               </div>
               <p class="muted">Lightweight, Low-RAM, Chrome-Compatible Desktop Browser Built with Rust &amp; Tauri v2</p>
             </div>
@@ -272,7 +272,7 @@
           <div class="about-card">
             <h3>Informasi Build &amp; Sesi</h3>
             <div class="about-kv">
-              <span>Versi Aplikasi</span><strong>V1.1.a (1.1.0-a)</strong>
+              <span>Versi Aplikasi</span><strong>V1.2a (1.2.0-a)</strong>
               <span>Backend</span><strong>Rust 2021 + Tauri v2</strong>
               <span>Penyimpanan Lokal</span><strong>SQLite WAL (rusqlite bundled)</strong>
               <span>BitTorrent Engine</span><strong>librqbit 8.1 (Native Rust)</strong>

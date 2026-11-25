@@ -19,6 +19,17 @@ use tokio::sync::Mutex as AsyncMutex;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskStatus {
+    Queued,
+    Downloading,
+    Paused,
+    Completed,
+    Failed,
+    Canceled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadTaskDto {
     pub id: String,
@@ -26,7 +37,7 @@ pub struct DownloadTaskDto {
     pub filename: String,
     pub url: String,
     pub save_path: String,
-    pub status: String, // "queued" | "downloading" | "paused" | "seeding" | "completed" | "failed" | "canceled"
+    pub status: TaskStatus,
     pub total_bytes: u64,
     pub downloaded_bytes: u64,
     pub speed_bps: u64,
@@ -39,6 +50,39 @@ pub struct DownloadTaskDto {
     pub created_at: String,
 }
 
+impl DownloadTaskDto {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        id: String,
+        kind: &str,
+        filename: String,
+        url: String,
+        save_path: String,
+        status: TaskStatus,
+        connections: u32,
+        quality: String,
+    ) -> Self {
+        Self {
+            id,
+            kind: kind.to_string(),
+            filename,
+            url,
+            save_path,
+            status,
+            total_bytes: 0,
+            downloaded_bytes: 0,
+            speed_bps: 0,
+            upload_speed_bps: 0,
+            eta_secs: 0,
+            connections,
+            peers: 0,
+            quality,
+            error: None,
+            created_at: now_iso(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedMedia {
     pub url: String,
@@ -49,9 +93,6 @@ pub struct DetectedMedia {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineStatusDto {
     pub ytdlp_installed: bool,
-    pub ytdlp_path: String,
-    pub torrent_ready: bool,
-    pub download_dir: String,
 }
 
 struct TaskControl {
@@ -68,6 +109,39 @@ pub struct DownloadManager {
     torrent_session: Arc<AsyncMutex<Option<Arc<Session>>>>,
     bin_dir: PathBuf,
     download_dir: PathBuf,
+}
+
+fn ytdlp_bin_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    }
+}
+
+fn update_task(
+    tasks: &Arc<Mutex<Vec<DownloadTaskDto>>>,
+    id: &str,
+    f: impl FnOnce(&mut DownloadTaskDto),
+) {
+    let mut list = tasks.lock().unwrap();
+    if let Some(task) = list.iter_mut().find(|t| t.id == id) {
+        f(task);
+    }
+}
+
+/// Blocks while `paused` is true and returns `true` if `canceled` was triggered.
+async fn wait_if_paused(paused: &AtomicBool, canceled: &AtomicBool) -> bool {
+    if canceled.load(Ordering::Relaxed) {
+        return true;
+    }
+    while paused.load(Ordering::Relaxed) {
+        if canceled.load(Ordering::Relaxed) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    false
 }
 
 impl DownloadManager {
@@ -104,67 +178,74 @@ impl DownloadManager {
         }
     }
 
+    fn register_task(
+        &self,
+        app: &AppHandle,
+        task: DownloadTaskDto,
+        torrent_id: Option<usize>,
+        torrent_handle: Option<Arc<ManagedTorrent>>,
+    ) -> (Arc<AtomicBool>, Arc<AtomicBool>) {
+        let paused = Arc::new(AtomicBool::new(false));
+        let canceled = Arc::new(AtomicBool::new(false));
+        let id = task.id.clone();
+
+        self.tasks.lock().unwrap().insert(0, task);
+        self.controls.lock().unwrap().insert(
+            id,
+            TaskControl {
+                paused: paused.clone(),
+                canceled: canceled.clone(),
+                torrent_id,
+                torrent_handle,
+            },
+        );
+        Self::emit_dm(app);
+        (paused, canceled)
+    }
+
     pub fn resolve_ytdlp_path(&self) -> Option<PathBuf> {
-        let bin_name = if cfg!(target_os = "windows") {
-            "yt-dlp.exe"
-        } else {
-            "yt-dlp"
-        };
-        let local = self.bin_dir.join(bin_name);
+        let local = self.bin_dir.join(ytdlp_bin_name());
         if local.exists() {
             return Some(local);
         }
-        // Check system PATH
-        let lookup_bin = if cfg!(target_os = "windows") {
+        let lookup = if cfg!(target_os = "windows") {
             "where"
         } else {
             "which"
         };
-        let mut cmd = std::process::Command::new(lookup_bin);
+        let mut cmd = std::process::Command::new(lookup);
         cmd.arg("yt-dlp");
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        if let Ok(out) = cmd.output() {
-            if out.status.success() {
-                if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
-                    let p = PathBuf::from(first.trim());
-                    if p.exists() {
-                        return Some(p);
-                    }
-                }
-            }
-        }
-        None
+        cmd.output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .map(|line| PathBuf::from(line.trim()))
+            })
+            .filter(|p| p.exists())
     }
 
     pub fn engine_status(&self) -> EngineStatusDto {
-        let ytdlp = self.resolve_ytdlp_path();
         EngineStatusDto {
-            ytdlp_installed: ytdlp.is_some(),
-            ytdlp_path: ytdlp
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default(),
-            torrent_ready: true,
-            download_dir: self.download_dir.to_string_lossy().to_string(),
+            ytdlp_installed: self.resolve_ytdlp_path().is_some(),
         }
     }
 
     /// Downloads official `yt-dlp` binary into ViBrowse's app data `bin/` folder.
     pub async fn install_ytdlp(&self, app: AppHandle) -> Result<String, String> {
         let _ = std::fs::create_dir_all(&self.bin_dir);
-        let (bin_name, url) = if cfg!(target_os = "windows") {
-            (
-                "yt-dlp.exe",
-                "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
-            )
+        let bin_name = ytdlp_bin_name();
+        let url = if cfg!(target_os = "windows") {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
         } else {
-            (
-                "yt-dlp",
-                "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux",
-            )
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
         };
         let dest = self.bin_dir.join(bin_name);
 
@@ -200,13 +281,6 @@ impl DownloadManager {
         Ok(dest.to_string_lossy().to_string())
     }
 
-    fn update_task(&self, id: &str, f: impl FnOnce(&mut DownloadTaskDto)) {
-        let mut guard = self.tasks.lock().unwrap();
-        if let Some(t) = guard.iter_mut().find(|x| x.id == id) {
-            f(t);
-        }
-    }
-
     /// 1. IDM-Style Multi-Connection Segmented HTTP/HTTPS Downloader
     pub async fn start_http_download(
         &self,
@@ -221,56 +295,31 @@ impl DownloadManager {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| infer_filename_from_url(&url));
         let save_path = unique_path(&self.download_dir, &initial_name);
+        let filename = save_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&initial_name)
+            .to_string();
 
-        let task = DownloadTaskDto {
-            id: id.clone(),
-            kind: "http".to_string(),
-            filename: save_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&initial_name)
-                .to_string(),
-            url: url.clone(),
-            save_path: save_path.to_string_lossy().to_string(),
-            status: "queued".to_string(),
-            total_bytes: 0,
-            downloaded_bytes: 0,
-            speed_bps: 0,
-            upload_speed_bps: 0,
-            eta_secs: 0,
-            connections: conn_count,
-            peers: 0,
-            quality: format!("{}-Conn IDM", conn_count),
-            error: None,
-            created_at: now_iso(),
-        };
-
-        let paused = Arc::new(AtomicBool::new(false));
-        let canceled = Arc::new(AtomicBool::new(false));
-
-        {
-            self.tasks.lock().unwrap().insert(0, task);
-            self.controls.lock().unwrap().insert(
-                id.clone(),
-                TaskControl {
-                    paused: paused.clone(),
-                    canceled: canceled.clone(),
-                    torrent_id: None,
-                    torrent_handle: None,
-                },
-            );
-        }
-        Self::emit_dm(&app);
+        let task = DownloadTaskDto::new(
+            id.clone(),
+            "http",
+            filename,
+            url.clone(),
+            save_path.to_string_lossy().to_string(),
+            TaskStatus::Queued,
+            conn_count,
+            format!("{}-Conn IDM", conn_count),
+        );
+        let (paused, canceled) = self.register_task(&app, task, None, None);
 
         let client = self.client.clone();
-        let tasks_arc = self.tasks.clone();
-        let id_clone = id.clone();
-        let app_clone = app.clone();
+        let tasks = self.tasks.clone();
+        let task_id = id.clone();
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             run_http_task(
-                app_clone, client, tasks_arc, id_clone, url, save_path, conn_count, paused,
-                canceled,
+                app, client, tasks, task_id, url, save_path, conn_count, paused, canceled,
             )
             .await;
         });
@@ -291,63 +340,41 @@ impl DownloadManager {
         })?;
 
         let id = short_id();
-        let quality_label = match quality.as_str() {
-            "1080p" => "1080p MP4",
-            "720p" => "720p MP4",
-            "480p" => "480p MP4",
-            "audio" => "Audio (M4A/MP3)",
-            _ => "Best Quality MP4",
-        };
-        let format_spec = match quality.as_str() {
-            "1080p" => "best[height<=1080][ext=mp4]/best[height<=1080]/best",
-            "720p" => "best[height<=720][ext=mp4]/best[height<=720]/best",
-            "480p" => "best[height<=480][ext=mp4]/best[height<=480]/best",
-            "audio" => "bestaudio[ext=m4a]/bestaudio/best",
-            _ => "best[ext=mp4]/best",
-        };
-
-        let task = DownloadTaskDto {
-            id: id.clone(),
-            kind: "video".to_string(),
-            filename: infer_filename_from_url(&url),
-            url: url.clone(),
-            save_path: self.download_dir.to_string_lossy().to_string(),
-            status: "downloading".to_string(),
-            total_bytes: 0,
-            downloaded_bytes: 0,
-            speed_bps: 0,
-            upload_speed_bps: 0,
-            eta_secs: 0,
-            connections: 4,
-            peers: 0,
-            quality: quality_label.to_string(),
-            error: None,
-            created_at: now_iso(),
+        let (quality_label, format_spec) = match quality.as_str() {
+            "1080p" => (
+                "1080p MP4",
+                "best[height<=1080][ext=mp4]/best[height<=1080]/best",
+            ),
+            "720p" => (
+                "720p MP4",
+                "best[height<=720][ext=mp4]/best[height<=720]/best",
+            ),
+            "480p" => (
+                "480p MP4",
+                "best[height<=480][ext=mp4]/best[height<=480]/best",
+            ),
+            "audio" => ("Audio (M4A/MP3)", "bestaudio[ext=m4a]/bestaudio/best"),
+            _ => ("Best Quality MP4", "best[ext=mp4]/best"),
         };
 
-        let paused = Arc::new(AtomicBool::new(false));
-        let canceled = Arc::new(AtomicBool::new(false));
+        let task = DownloadTaskDto::new(
+            id.clone(),
+            "video",
+            infer_filename_from_url(&url),
+            url.clone(),
+            self.download_dir.to_string_lossy().to_string(),
+            TaskStatus::Downloading,
+            4,
+            quality_label.to_string(),
+        );
+        let (_paused, canceled) = self.register_task(&app, task, None, None);
 
-        {
-            self.tasks.lock().unwrap().insert(0, task);
-            self.controls.lock().unwrap().insert(
-                id.clone(),
-                TaskControl {
-                    paused: paused.clone(),
-                    canceled: canceled.clone(),
-                    torrent_id: None,
-                    torrent_handle: None,
-                },
-            );
-        }
-        Self::emit_dm(&app);
-
-        let tasks_arc = self.tasks.clone();
+        let tasks = self.tasks.clone();
         let download_dir = self.download_dir.clone();
-        let id_clone = id.clone();
+        let task_id = id.clone();
         let format_str = format_spec.to_string();
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut cmd = Command::new(&ytdlp_path);
             cmd.args([
                 "--newline",
@@ -372,8 +399,8 @@ impl DownloadManager {
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    update_task_arc(&tasks_arc, &id_clone, |t| {
-                        t.status = "failed".to_string();
+                    update_task(&tasks, &task_id, |t| {
+                        t.status = TaskStatus::Failed;
                         t.error = Some(format!("Gagal menjalankan yt-dlp: {}", e));
                     });
                     Self::emit_dm(&app);
@@ -381,15 +408,14 @@ impl DownloadManager {
                 }
             };
 
-            let stdout = child.stdout.take();
-            if let Some(out) = stdout {
+            if let Some(out) = child.stdout.take() {
                 let mut reader = BufReader::new(out).lines();
                 let mut last_emit = Instant::now();
                 while let Ok(Some(line)) = reader.next_line().await {
                     if canceled.load(Ordering::Relaxed) {
                         let _ = child.kill().await;
-                        update_task_arc(&tasks_arc, &id_clone, |t| {
-                            t.status = "canceled".to_string();
+                        update_task(&tasks, &task_id, |t| {
+                            t.status = TaskStatus::Canceled;
                             t.speed_bps = 0;
                         });
                         Self::emit_dm(&app);
@@ -397,21 +423,21 @@ impl DownloadManager {
                     }
                     let trimmed = line.trim();
                     if let Some(dest) = trimmed.strip_prefix("[download] Destination: ") {
-                        let p = PathBuf::from(dest.trim());
-                        let fname = p
+                        let dest_str = dest.trim();
+                        let fname = PathBuf::from(dest_str)
                             .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("video.mp4")
                             .to_string();
-                        update_task_arc(&tasks_arc, &id_clone, |t| {
+                        update_task(&tasks, &task_id, |t| {
                             t.filename = fname;
-                            t.save_path = dest.trim().to_string();
+                            t.save_path = dest_str.to_string();
                         });
                         Self::emit_dm(&app);
                     } else if trimmed.starts_with("[download]") && trimmed.contains('%') {
                         if let Some((pct, total_b, speed_b, eta_s)) = parse_ytdlp_progress(trimmed)
                         {
-                            update_task_arc(&tasks_arc, &id_clone, |t| {
+                            update_task(&tasks, &task_id, |t| {
                                 if total_b > 0 {
                                     t.total_bytes = total_b;
                                     t.downloaded_bytes = ((total_b as f64) * pct / 100.0) as u64;
@@ -431,34 +457,27 @@ impl DownloadManager {
                 }
             }
 
-            let status = child.wait().await;
-            match status {
-                Ok(s) if s.success() => {
-                    update_task_arc(&tasks_arc, &id_clone, |t| {
-                        t.status = "completed".to_string();
-                        if t.total_bytes > 0 {
-                            t.downloaded_bytes = t.total_bytes;
-                        }
+            match child.wait().await {
+                Ok(s) if s.success() => update_task(&tasks, &task_id, |t| {
+                    t.status = TaskStatus::Completed;
+                    if t.total_bytes > 0 {
+                        t.downloaded_bytes = t.total_bytes;
+                    }
+                    t.speed_bps = 0;
+                    t.eta_secs = 0;
+                }),
+                Ok(s) => update_task(&tasks, &task_id, |t| {
+                    if t.status != TaskStatus::Canceled {
+                        t.status = TaskStatus::Failed;
+                        t.error = Some(format!("yt-dlp berhenti dengan kode {}", s));
                         t.speed_bps = 0;
-                        t.eta_secs = 0;
-                    });
-                }
-                Ok(s) => {
-                    update_task_arc(&tasks_arc, &id_clone, |t| {
-                        if t.status != "canceled" {
-                            t.status = "failed".to_string();
-                            t.error = Some(format!("yt-dlp berhenti dengan kode {}", s));
-                            t.speed_bps = 0;
-                        }
-                    });
-                }
-                Err(e) => {
-                    update_task_arc(&tasks_arc, &id_clone, |t| {
-                        t.status = "failed".to_string();
-                        t.error = Some(e.to_string());
-                        t.speed_bps = 0;
-                    });
-                }
+                    }
+                }),
+                Err(e) => update_task(&tasks, &task_id, |t| {
+                    t.status = TaskStatus::Failed;
+                    t.error = Some(e.to_string());
+                    t.speed_bps = 0;
+                }),
             }
             Self::emit_dm(&app);
         });
@@ -476,15 +495,15 @@ impl DownloadManager {
         let _ = std::fs::create_dir_all(&torrent_dir);
 
         let session = {
-            let mut guard = self.torrent_session.lock().await;
-            if let Some(existing) = guard.as_ref() {
+            let mut slot = self.torrent_session.lock().await;
+            if let Some(existing) = slot.as_ref() {
                 existing.clone()
             } else {
-                let s = Session::new(torrent_dir.clone())
+                let created = Session::new(torrent_dir.clone())
                     .await
                     .map_err(|e| format!("Gagal memulai engine BitTorrent: {}", e))?;
-                *guard = Some(s.clone());
-                s
+                *slot = Some(created.clone());
+                created
             }
         };
 
@@ -523,46 +542,22 @@ impl DownloadManager {
             .name()
             .unwrap_or_else(|| infer_filename_from_url(&magnet_or_url));
 
-        let task = DownloadTaskDto {
-            id: id.clone(),
-            kind: "torrent".to_string(),
-            filename: name,
-            url: magnet_or_url,
-            save_path: torrent_dir.to_string_lossy().to_string(),
-            status: "downloading".to_string(),
-            total_bytes: 0,
-            downloaded_bytes: 0,
-            speed_bps: 0,
-            upload_speed_bps: 0,
-            eta_secs: 0,
-            connections: 0,
-            peers: 0,
-            quality: "BitTorrent P2P".to_string(),
-            error: None,
-            created_at: now_iso(),
-        };
+        let task = DownloadTaskDto::new(
+            id.clone(),
+            "torrent",
+            name,
+            magnet_or_url,
+            torrent_dir.to_string_lossy().to_string(),
+            TaskStatus::Downloading,
+            0,
+            "BitTorrent P2P".to_string(),
+        );
+        let (paused, canceled) = self.register_task(&app, task, Some(rq_id), Some(handle.clone()));
 
-        let paused = Arc::new(AtomicBool::new(false));
-        let canceled = Arc::new(AtomicBool::new(false));
+        let tasks = self.tasks.clone();
+        let task_id = id.clone();
 
-        {
-            self.tasks.lock().unwrap().insert(0, task);
-            self.controls.lock().unwrap().insert(
-                id.clone(),
-                TaskControl {
-                    paused: paused.clone(),
-                    canceled: canceled.clone(),
-                    torrent_id: Some(rq_id),
-                    torrent_handle: Some(handle.clone()),
-                },
-            );
-        }
-        Self::emit_dm(&app);
-
-        let tasks_arc = self.tasks.clone();
-        let id_clone = id.clone();
-
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(1));
             loop {
                 ticker.tick().await;
@@ -573,29 +568,29 @@ impl DownloadManager {
                 let (down_bps, up_bps, peers, eta_s) = if let Some(live) = &stats.live {
                     let down = (live.download_speed.mbps * 1024.0 * 1024.0) as u64;
                     let up = (live.upload_speed.mbps * 1024.0 * 1024.0) as u64;
-                    let p = live.snapshot.peer_stats.live as u32;
+                    let peer_count = live.snapshot.peer_stats.live as u32;
                     let eta = if down > 0 && stats.total_bytes > stats.progress_bytes {
                         (stats.total_bytes - stats.progress_bytes) / down
                     } else {
                         0
                     };
-                    (down, up, p, eta)
+                    (down, up, peer_count, eta)
                 } else {
                     (0, 0, 0, 0)
                 };
 
                 let new_name = handle.name();
                 let new_status = if stats.error.is_some() {
-                    "failed"
+                    TaskStatus::Failed
                 } else if paused.load(Ordering::Relaxed) {
-                    "paused"
+                    TaskStatus::Paused
                 } else if stats.finished {
-                    "completed"
+                    TaskStatus::Completed
                 } else {
-                    "downloading"
+                    TaskStatus::Downloading
                 };
 
-                update_task_arc(&tasks_arc, &id_clone, |t| {
+                update_task(&tasks, &task_id, |t| {
                     if let Some(n) = new_name {
                         t.filename = n;
                     }
@@ -606,7 +601,7 @@ impl DownloadManager {
                     t.peers = peers;
                     t.connections = peers;
                     t.eta_secs = eta_s;
-                    t.status = new_status.to_string();
+                    t.status = new_status;
                     t.error = stats.error.clone();
                 });
                 Self::emit_dm(&app);
@@ -621,23 +616,23 @@ impl DownloadManager {
     }
 
     pub async fn pause_task(&self, app: AppHandle, id: &str) -> Result<(), String> {
-        let torrent_handle = {
-            let guard = self.controls.lock().unwrap();
-            let ctrl = guard
+        let handle = {
+            let controls = self.controls.lock().unwrap();
+            let ctrl = controls
                 .get(id)
                 .ok_or_else(|| "Task tidak ditemukan".to_string())?;
             ctrl.paused.store(true, Ordering::Relaxed);
             ctrl.torrent_handle.clone()
         };
 
-        if let Some(handle) = torrent_handle {
+        if let Some(h) = handle {
             if let Some(session) = self.torrent_session.lock().await.as_ref() {
-                let _ = session.pause(&handle).await;
+                let _ = session.pause(&h).await;
             }
         }
-        self.update_task(id, |t| {
-            if t.status == "downloading" || t.status == "queued" {
-                t.status = "paused".to_string();
+        update_task(&self.tasks, id, |t| {
+            if matches!(t.status, TaskStatus::Downloading | TaskStatus::Queued) {
+                t.status = TaskStatus::Paused;
                 t.speed_bps = 0;
             }
         });
@@ -646,23 +641,23 @@ impl DownloadManager {
     }
 
     pub async fn resume_task(&self, app: AppHandle, id: &str) -> Result<(), String> {
-        let torrent_handle = {
-            let guard = self.controls.lock().unwrap();
-            let ctrl = guard
+        let handle = {
+            let controls = self.controls.lock().unwrap();
+            let ctrl = controls
                 .get(id)
                 .ok_or_else(|| "Task tidak ditemukan".to_string())?;
             ctrl.paused.store(false, Ordering::Relaxed);
             ctrl.torrent_handle.clone()
         };
 
-        if let Some(handle) = torrent_handle {
+        if let Some(h) = handle {
             if let Some(session) = self.torrent_session.lock().await.as_ref() {
-                let _ = session.unpause(&handle).await;
+                let _ = session.unpause(&h).await;
             }
         }
-        self.update_task(id, |t| {
-            if t.status == "paused" {
-                t.status = "downloading".to_string();
+        update_task(&self.tasks, id, |t| {
+            if t.status == TaskStatus::Paused {
+                t.status = TaskStatus::Downloading;
             }
         });
         Self::emit_dm(&app);
@@ -671,14 +666,12 @@ impl DownloadManager {
 
     pub async fn cancel_task(&self, app: AppHandle, id: &str) -> Result<(), String> {
         let torrent_id = {
-            let guard = self.controls.lock().unwrap();
-            if let Some(ctrl) = guard.get(id) {
+            let controls = self.controls.lock().unwrap();
+            controls.get(id).and_then(|ctrl| {
                 ctrl.canceled.store(true, Ordering::Relaxed);
                 ctrl.paused.store(false, Ordering::Relaxed);
                 ctrl.torrent_id
-            } else {
-                None
-            }
+            })
         };
 
         if let Some(rq_id) = torrent_id {
@@ -686,8 +679,8 @@ impl DownloadManager {
                 let _ = session.delete(TorrentIdOrHash::Id(rq_id), false).await;
             }
         }
-        self.update_task(id, |t| {
-            t.status = "canceled".to_string();
+        update_task(&self.tasks, id, |t| {
+            t.status = TaskStatus::Canceled;
             t.speed_bps = 0;
         });
         Self::emit_dm(&app);
@@ -701,22 +694,13 @@ impl DownloadManager {
     }
 
     pub fn clear_finished(&self, app: AppHandle) {
-        self.tasks
-            .lock()
-            .unwrap()
-            .retain(|t| t.status == "downloading" || t.status == "queued" || t.status == "paused");
+        self.tasks.lock().unwrap().retain(|t| {
+            matches!(
+                t.status,
+                TaskStatus::Downloading | TaskStatus::Queued | TaskStatus::Paused
+            )
+        });
         Self::emit_dm(&app);
-    }
-}
-
-fn update_task_arc(
-    tasks: &Arc<Mutex<Vec<DownloadTaskDto>>>,
-    id: &str,
-    f: impl FnOnce(&mut DownloadTaskDto),
-) {
-    let mut guard = tasks.lock().unwrap();
-    if let Some(t) = guard.iter_mut().find(|x| x.id == id) {
-        f(t);
     }
 }
 
@@ -732,10 +716,9 @@ async fn run_http_task(
     paused: Arc<AtomicBool>,
     canceled: Arc<AtomicBool>,
 ) {
-    update_task_arc(&tasks, &id, |t| t.status = "downloading".to_string());
+    update_task(&tasks, &id, |t| t.status = TaskStatus::Downloading);
     DownloadManager::emit_dm(&app);
 
-    // Probe server for Content-Length, Accept-Ranges, and Content-Disposition
     let mut total_bytes: u64 = 0;
     let mut supports_ranges = false;
     if let Ok(head) = client.head(&url).send().await {
@@ -762,7 +745,7 @@ async fn run_http_task(
             if let Some(fname) = extract_disposition_filename(cd) {
                 if let Some(parent) = save_path.parent() {
                     save_path = unique_path(parent, &fname);
-                    update_task_arc(&tasks, &id, |t| {
+                    update_task(&tasks, &id, |t| {
                         t.filename = save_path
                             .file_name()
                             .and_then(|n| n.to_str())
@@ -778,7 +761,7 @@ async fn run_http_task(
     let use_multi = supports_ranges && total_bytes >= 1_048_576 && connections > 1;
     let actual_conns = if use_multi { connections } else { 1 };
 
-    update_task_arc(&tasks, &id, |t| {
+    update_task(&tasks, &id, |t| {
         t.total_bytes = total_bytes;
         t.connections = actual_conns;
         t.quality = if use_multi {
@@ -789,65 +772,57 @@ async fn run_http_task(
     });
     DownloadManager::emit_dm(&app);
 
-    let downloaded_atomic = Arc::new(AtomicU64::new(0));
-
-    // Speed & progress reporter task
+    let downloaded = Arc::new(AtomicU64::new(0));
     let stop_reporter = Arc::new(AtomicBool::new(false));
-    let rep_stop = stop_reporter.clone();
-    let rep_dl = downloaded_atomic.clone();
-    let rep_tasks = tasks.clone();
-    let rep_id = id.clone();
-    let rep_app = app.clone();
-    let rep_paused = paused.clone();
-    let reporter = tokio::spawn(async move {
-        let mut prev_bytes: u64 = 0;
-        let mut ticker = tokio::time::interval(Duration::from_millis(500));
-        while !rep_stop.load(Ordering::Relaxed) {
-            ticker.tick().await;
-            let cur = rep_dl.load(Ordering::Relaxed);
-            let delta = cur.saturating_sub(prev_bytes);
-            prev_bytes = cur;
-            let speed = if rep_paused.load(Ordering::Relaxed) {
-                0
-            } else {
-                delta * 2 // 500ms interval -> bytes/sec
-            };
-            let eta = if speed > 0 && total_bytes > cur {
-                (total_bytes - cur) / speed
-            } else {
-                0
-            };
-            update_task_arc(&rep_tasks, &rep_id, |t| {
-                t.downloaded_bytes = cur;
-                t.speed_bps = speed;
-                t.eta_secs = eta;
-            });
-            DownloadManager::emit_dm(&rep_app);
-        }
-    });
+    let reporter = {
+        let stop = stop_reporter.clone();
+        let dl = downloaded.clone();
+        let tasks = tasks.clone();
+        let id = id.clone();
+        let app = app.clone();
+        let paused = paused.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut prev: u64 = 0;
+            let mut ticker = tokio::time::interval(Duration::from_millis(500));
+            while !stop.load(Ordering::Relaxed) {
+                ticker.tick().await;
+                let cur = dl.load(Ordering::Relaxed);
+                let delta = cur.saturating_sub(prev);
+                prev = cur;
+                let speed = if paused.load(Ordering::Relaxed) {
+                    0
+                } else {
+                    delta * 2
+                };
+                let eta = if speed > 0 && total_bytes > cur {
+                    (total_bytes - cur) / speed
+                } else {
+                    0
+                };
+                update_task(&tasks, &id, |t| {
+                    t.downloaded_bytes = cur;
+                    t.speed_bps = speed;
+                    t.eta_secs = eta;
+                });
+                DownloadManager::emit_dm(&app);
+            }
+        })
+    };
 
-    let result: Result<(), String> = if use_multi {
+    let result = if use_multi {
         run_segmented_http(
             &client,
             &url,
             &save_path,
             total_bytes,
             actual_conns,
-            &downloaded_atomic,
+            &downloaded,
             &paused,
             &canceled,
         )
         .await
     } else {
-        run_single_http(
-            &client,
-            &url,
-            &save_path,
-            &downloaded_atomic,
-            &paused,
-            &canceled,
-        )
-        .await
+        run_single_http(&client, &url, &save_path, &downloaded, &paused, &canceled).await
     };
 
     stop_reporter.store(true, Ordering::Relaxed);
@@ -855,17 +830,17 @@ async fn run_http_task(
 
     if canceled.load(Ordering::Relaxed) {
         let _ = tokio::fs::remove_file(&save_path).await;
-        update_task_arc(&tasks, &id, |t| {
-            t.status = "canceled".to_string();
+        update_task(&tasks, &id, |t| {
+            t.status = TaskStatus::Canceled;
             t.speed_bps = 0;
             t.eta_secs = 0;
         });
     } else {
         match result {
             Ok(()) => {
-                let final_bytes = downloaded_atomic.load(Ordering::Relaxed);
-                update_task_arc(&tasks, &id, |t| {
-                    t.status = "completed".to_string();
+                let final_bytes = downloaded.load(Ordering::Relaxed);
+                update_task(&tasks, &id, |t| {
+                    t.status = TaskStatus::Completed;
                     t.downloaded_bytes = final_bytes;
                     if t.total_bytes == 0 {
                         t.total_bytes = final_bytes;
@@ -874,14 +849,12 @@ async fn run_http_task(
                     t.eta_secs = 0;
                 });
             }
-            Err(e) => {
-                update_task_arc(&tasks, &id, |t| {
-                    t.status = "failed".to_string();
-                    t.error = Some(e);
-                    t.speed_bps = 0;
-                    t.eta_secs = 0;
-                });
-            }
+            Err(e) => update_task(&tasks, &id, |t| {
+                t.status = TaskStatus::Failed;
+                t.error = Some(e);
+                t.speed_bps = 0;
+                t.eta_secs = 0;
+            }),
         }
     }
     DownloadManager::emit_dm(&app);
@@ -898,7 +871,6 @@ async fn run_segmented_http(
     paused: &Arc<AtomicBool>,
     canceled: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    // Pre-allocate target file
     let file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -912,38 +884,34 @@ async fn run_segmented_http(
     drop(file);
 
     let chunk_size = total_bytes / (conns as u64);
-    let mut ranges = Vec::with_capacity(conns as usize);
-    for i in 0..conns {
-        let start = (i as u64) * chunk_size;
-        let end = if i == conns - 1 {
+    let mut handles = Vec::with_capacity(conns as usize);
+
+    for idx in 0..conns {
+        let start = (idx as u64) * chunk_size;
+        let end = if idx == conns - 1 {
             total_bytes - 1
         } else {
             start + chunk_size - 1
         };
-        ranges.push((start, end));
-    }
+        let client = client.clone();
+        let url = url.to_string();
+        let path = save_path.to_path_buf();
+        let downloaded = downloaded.clone();
+        let paused = paused.clone();
+        let canceled = canceled.clone();
 
-    let mut handles = Vec::new();
-    for (idx, (start, end)) in ranges.into_iter().enumerate() {
-        let c = client.clone();
-        let u = url.to_string();
-        let p = save_path.to_path_buf();
-        let dl = downloaded.clone();
-        let ps = paused.clone();
-        let cn = canceled.clone();
-
-        handles.push(tokio::spawn(async move {
-            let mut f = OpenOptions::new()
+        handles.push(tauri::async_runtime::spawn(async move {
+            let mut file = OpenOptions::new()
                 .write(true)
-                .open(&p)
+                .open(&path)
                 .await
                 .map_err(|e| e.to_string())?;
-            f.seek(SeekFrom::Start(start))
+            file.seek(SeekFrom::Start(start))
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let mut resp = c
-                .get(&u)
+            let mut resp = client
+                .get(&url)
                 .header(RANGE, format!("bytes={}-{}", start, end))
                 .send()
                 .await
@@ -952,19 +920,13 @@ async fn run_segmented_http(
                 return Err(format!("Segment {} HTTP {}", idx, resp.status()));
             }
             while let Some(bytes) = resp.chunk().await.map_err(|e| e.to_string())? {
-                if cn.load(Ordering::Relaxed) {
+                if wait_if_paused(&paused, &canceled).await {
                     return Ok(());
                 }
-                while ps.load(Ordering::Relaxed) {
-                    if cn.load(Ordering::Relaxed) {
-                        return Ok(());
-                    }
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
-                f.write_all(&bytes).await.map_err(|e| e.to_string())?;
-                dl.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
             }
-            f.flush().await.map_err(|e| e.to_string())?;
+            file.flush().await.map_err(|e| e.to_string())?;
             Ok::<(), String>(())
         }));
     }
@@ -987,23 +949,17 @@ async fn run_single_http(
     if !resp.status().is_success() {
         return Err(format!("HTTP error: {}", resp.status()));
     }
-    let mut f = tokio::fs::File::create(save_path)
+    let mut file = tokio::fs::File::create(save_path)
         .await
         .map_err(|e| e.to_string())?;
     while let Some(bytes) = resp.chunk().await.map_err(|e| e.to_string())? {
-        if canceled.load(Ordering::Relaxed) {
+        if wait_if_paused(paused, canceled).await {
             return Ok(());
         }
-        while paused.load(Ordering::Relaxed) {
-            if canceled.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        f.write_all(&bytes).await.map_err(|e| e.to_string())?;
+        file.write_all(&bytes).await.map_err(|e| e.to_string())?;
         downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
     }
-    f.flush().await.map_err(|e| e.to_string())?;
+    file.flush().await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1065,63 +1021,62 @@ fn unique_path(dir: &Path, filename: &str) -> PathBuf {
             Some(e) => format!("{} ({}).{}", stem, i, e),
             None => format!("{} ({})", stem, i),
         };
-        let p = dir.join(name);
-        if !p.exists() {
-            return p;
+        let path = dir.join(name);
+        if !path.exists() {
+            return path;
         }
     }
     dir.join(format!("{}_{}", short_id(), safe))
 }
 
 fn extract_disposition_filename(header: &str) -> Option<String> {
-    for part in header.split(';') {
-        let p = part.trim();
-        if let Some(rest) = p.strip_prefix("filename=") {
-            let val = rest.trim_matches('"').trim();
-            if !val.is_empty() {
-                return Some(sanitize_filename(val));
-            }
-        }
-    }
-    None
+    header.split(';').find_map(|part| {
+        part.trim()
+            .strip_prefix("filename=")
+            .map(|rest| rest.trim_matches('"').trim())
+            .filter(|val| !val.is_empty())
+            .map(sanitize_filename)
+    })
 }
 
 /// Parses yt-dlp progress line: `[download]  45.2% of ~120.50MiB at   5.20MiB/s ETA 00:12`
 fn parse_ytdlp_progress(line: &str) -> Option<(f64, u64, u64, u64)> {
     let pct_idx = line.find('%')?;
-    let before_pct = &line[..pct_idx];
-    let pct_str = before_pct.split_whitespace().next_back()?;
-    let pct: f64 = pct_str.parse().ok()?;
+    let pct: f64 = line[..pct_idx]
+        .split_whitespace()
+        .next_back()?
+        .parse()
+        .ok()?;
 
-    let mut total_bytes = 0u64;
-    if let Some(of_idx) = line.find(" of ") {
-        let rest = line[of_idx + 4..].trim_start_matches('~').trim();
-        if let Some(tok) = rest.split_whitespace().next() {
-            total_bytes = parse_human_bytes(tok);
-        }
-    }
+    let total_bytes = line
+        .find(" of ")
+        .and_then(|i| {
+            line[i + 4..]
+                .trim_start_matches('~')
+                .split_whitespace()
+                .next()
+        })
+        .map(parse_human_bytes)
+        .unwrap_or(0);
 
-    let mut speed_bps = 0u64;
-    if let Some(at_idx) = line.find(" at ") {
-        let rest = line[at_idx + 4..].trim();
-        if let Some(tok) = rest.split_whitespace().next() {
-            let clean = tok.trim_end_matches("/s");
-            speed_bps = parse_human_bytes(clean);
-        }
-    }
+    let speed_bps = line
+        .find(" at ")
+        .and_then(|i| line[i + 4..].split_whitespace().next())
+        .map(|tok| parse_human_bytes(tok.trim_end_matches("/s")))
+        .unwrap_or(0);
 
-    let mut eta_secs = 0u64;
-    if let Some(eta_idx) = line.find(" ETA ") {
-        let rest = line[eta_idx + 5..].trim();
-        if let Some(tok) = rest.split_whitespace().next() {
+    let eta_secs = line
+        .find(" ETA ")
+        .and_then(|i| line[i + 5..].split_whitespace().next())
+        .map(|tok| {
             let parts: Vec<u64> = tok.split(':').filter_map(|p| p.parse().ok()).collect();
-            eta_secs = match parts.as_slice() {
+            match parts.as_slice() {
                 [m, s] => m * 60 + s,
                 [h, m, s] => h * 3600 + m * 60 + s,
                 _ => 0,
-            };
-        }
-    }
+            }
+        })
+        .unwrap_or(0);
 
     Some((pct, total_bytes, speed_bps, eta_secs))
 }

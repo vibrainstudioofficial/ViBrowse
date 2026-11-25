@@ -10,8 +10,8 @@ export CARGO_TARGET_DIR="/tmp/vibrowse-linux-target"
 
 APP_NAME="vibrowse"
 DISPLAY_NAME="ViBrowse"
-DEB_VERSION="1.1.0~a"
-RPM_VERSION="1.1.0_a"
+DEB_VERSION="1.2.0~a"
+RPM_VERSION="1.2.0_a"
 ARCH_DEB="amd64"
 ARCH_RPM="x86_64"
 
@@ -77,7 +77,7 @@ Description: ViBrowse V1.1.a — Lightweight Rust Web Browser
  BitTorrent client.
 EOF
 
-DEB_OUT="$OUT_DIR/ViBrowse-V1.1.a-linux-${ARCH_DEB}.deb"
+DEB_OUT="$OUT_DIR/ViBrowse-V1.2a-linux-${ARCH_DEB}.deb"
 dpkg-deb --root-owner-group -Zxz --build "$DEB_STAGE" "$DEB_OUT"
 
 echo "[3/4] Packaging Fedora/RHEL/openSUSE (.rpm)..."
@@ -129,7 +129,7 @@ EOF
 
 rpmbuild --define "_topdir $RPM_TOP" -bb "$RPM_TOP/SPECS/$APP_NAME.spec"
 RPM_BUILT="$(find "$RPM_TOP/RPMS" -name '*.rpm' | head -n 1)"
-RPM_OUT="$OUT_DIR/ViBrowse-V1.1.a-linux-${ARCH_RPM}.rpm"
+RPM_OUT="$OUT_DIR/ViBrowse-V1.2a-linux-${ARCH_RPM}.rpm"
 cp -f "$RPM_BUILT" "$RPM_OUT"
 
 echo "[4/4] Done! Linux packages saved to $OUT_DIR:"

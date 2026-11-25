@@ -18,6 +18,10 @@ pub fn is_internal_url(url: &str) -> bool {
     url == NEWTAB_URL || url == DOWNLOADS_URL || url == ABOUT_URL
 }
 
+pub fn tab_label(tab_id: &str) -> String {
+    format!("tab-{}", tab_id)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabDto {
     pub id: String,
@@ -51,7 +55,7 @@ pub struct TabRecord {
 
 impl TabRecord {
     pub fn webview_label(&self) -> String {
-        format!("tab-{}", self.id)
+        tab_label(&self.id)
     }
 
     pub fn to_dto(&self, is_bookmarked: bool) -> TabDto {
@@ -107,6 +111,16 @@ pub struct InnerState {
     pub is_fullscreen: bool,
 }
 
+impl InnerState {
+    pub fn tab(&self, id: &str) -> Option<&TabRecord> {
+        self.tabs.iter().find(|t| t.id == id)
+    }
+
+    pub fn tab_mut(&mut self, id: &str) -> Option<&mut TabRecord> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+}
+
 pub struct AppState {
     pub inner: Mutex<InnerState>,
     pub storage: Storage,
@@ -134,34 +148,34 @@ impl AppState {
 
     pub fn snapshot(&self) -> BrowserSnapshot {
         let bookmarked = self.storage.bookmarked_urls_set();
-        let guard = self.inner.lock().unwrap();
-        let tabs: Vec<TabDto> = guard
+        let inner = self.inner.lock().unwrap();
+        let tabs: Vec<TabDto> = inner
             .tabs
             .iter()
             .map(|t| t.to_dto(bookmarked.contains(&t.url)))
             .collect();
-        let sleeping_tabs_count = guard.tabs.iter().filter(|t| t.is_sleeping).count();
-        let active_webviews_count = guard
+        let sleeping_tabs_count = inner.tabs.iter().filter(|t| t.is_sleeping).count();
+        let active_webviews_count = inner
             .tabs
             .iter()
             .filter(|t| t.has_webview && !t.is_sleeping)
             .count();
         BrowserSnapshot {
             tabs,
-            active_tab_id: guard.active_tab_id.clone(),
-            active_panel: guard.active_panel.clone(),
-            settings: guard.settings.clone(),
+            active_tab_id: inner.active_tab_id.clone(),
+            active_panel: inner.active_panel.clone(),
+            settings: inner.settings.clone(),
             adblock_blocked_count: self.adblock.total_blocked(),
             sleeping_tabs_count,
             active_webviews_count,
             estimated_ram_saved_mb: sleeping_tabs_count * 75,
-            is_fullscreen: guard.is_fullscreen,
+            is_fullscreen: inner.is_fullscreen,
         }
     }
 
     pub fn top_bar_height(&self) -> f64 {
-        let guard = self.inner.lock().unwrap();
-        if guard.settings.show_bookmarks_bar {
+        let inner = self.inner.lock().unwrap();
+        if inner.settings.show_bookmarks_bar {
             TOP_BAR_BASE_HEIGHT + BOOKMARKS_BAR_HEIGHT
         } else {
             TOP_BAR_BASE_HEIGHT
@@ -169,8 +183,7 @@ impl AppState {
     }
 
     pub fn side_panel_width(&self) -> f64 {
-        let guard = self.inner.lock().unwrap();
-        if guard.active_panel.is_some() {
+        if self.inner.lock().unwrap().active_panel.is_some() {
             SIDE_PANEL_WIDTH
         } else {
             0.0

@@ -2,7 +2,6 @@ use crate::util::extract_host;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
-use url::Url;
 
 /// Built-in lightweight ad, tracker & streaming pop-under domain list (O(1) lookup).
 const DEFAULT_BLOCKED_DOMAINS: &[&str] = &[
@@ -192,7 +191,8 @@ fn root_domain(host: &str) -> String {
 }
 
 pub struct AdBlocker {
-    blocked_domains: RwLock<HashSet<String>>,
+    blocked_domains: HashSet<&'static str>,
+    blocked_domains_json: String,
     allowlist_hosts: RwLock<HashSet<String>>,
     popup_allowlist_hosts: RwLock<HashSet<String>>,
     blocked_count: AtomicU64,
@@ -200,12 +200,13 @@ pub struct AdBlocker {
 
 impl AdBlocker {
     pub fn new() -> Self {
-        let mut set = HashSet::with_capacity(DEFAULT_BLOCKED_DOMAINS.len());
-        for d in DEFAULT_BLOCKED_DOMAINS {
-            set.insert((*d).to_string());
-        }
+        let blocked_domains: HashSet<&'static str> =
+            DEFAULT_BLOCKED_DOMAINS.iter().copied().collect();
+        let blocked_domains_json =
+            serde_json::to_string(DEFAULT_BLOCKED_DOMAINS).unwrap_or_else(|_| "[]".to_string());
         Self {
-            blocked_domains: RwLock::new(set),
+            blocked_domains,
+            blocked_domains_json,
             allowlist_hosts: RwLock::new(HashSet::new()),
             popup_allowlist_hosts: RwLock::new(HashSet::new()),
             blocked_count: AtomicU64::new(0),
@@ -213,18 +214,16 @@ impl AdBlocker {
     }
 
     fn matches_blocked_host(&self, host: &str) -> bool {
-        let blocked = self.blocked_domains.read().unwrap();
-        let mut current: &str = host;
+        let mut current = host;
         loop {
-            if blocked.contains(current) {
+            if self.blocked_domains.contains(current) {
                 return true;
             }
             match current.find('.') {
                 Some(idx) => current = &current[idx + 1..],
-                None => break,
+                None => return false,
             }
         }
-        false
     }
 
     fn matches_url_pattern(raw_url: &str) -> bool {
@@ -233,8 +232,8 @@ impl AdBlocker {
     }
 
     /// Checks whether a top-level navigation URL should be blocked.
-    pub fn should_block_url(&self, raw_url: &str, enabled: bool) -> bool {
-        if !enabled {
+    pub fn should_block_url(&self, raw_url: &str, adblock_enabled: bool) -> bool {
+        if !adblock_enabled {
             return false;
         }
         let Some(host) = extract_host(raw_url) else {
@@ -251,24 +250,17 @@ impl AdBlocker {
     }
 
     /// Checks whether a subresource request (script, iframe, xhr, image) on `page_host` should be blocked.
-    pub fn should_block_subresource(&self, raw_url: &str, page_host: &str, enabled: bool) -> bool {
-        if !enabled {
+    pub fn should_block_subresource(
+        &self,
+        raw_url: &str,
+        page_host: &str,
+        adblock_enabled: bool,
+    ) -> bool {
+        if !adblock_enabled || (!page_host.is_empty() && self.is_allowlisted(page_host)) {
             return false;
         }
-        if !page_host.is_empty() && self.is_allowlisted(page_host) {
+        let Some(req_host) = extract_host(raw_url) else {
             return false;
-        }
-        let parsed = match Url::parse(raw_url) {
-            Ok(u) => u,
-            Err(_) => return false,
-        };
-        let scheme = parsed.scheme();
-        if scheme != "http" && scheme != "https" {
-            return false;
-        }
-        let req_host = match parsed.host_str() {
-            Some(h) => h.to_lowercase(),
-            None => return false,
         };
         if self.matches_blocked_host(&req_host) || Self::matches_url_pattern(raw_url) {
             self.blocked_count.fetch_add(1, Ordering::Relaxed);
@@ -287,7 +279,6 @@ impl AdBlocker {
     ) -> bool {
         let source_host = extract_host(source_url).unwrap_or_default();
 
-        // Always block known ad/tracker URLs when adblock is enabled (unless site is allowlisted)
         if adblock_enabled
             && (source_host.is_empty() || !self.is_allowlisted(&source_host))
             && self.should_block_url(target_url, true)
@@ -305,7 +296,6 @@ impl AdBlocker {
             return false;
         };
 
-        // Allow trusted OAuth/login popups
         if SAFE_POPUP_HOSTS
             .iter()
             .any(|safe| target_host == *safe || target_host.ends_with(&format!(".{}", safe)))
@@ -313,7 +303,6 @@ impl AdBlocker {
             return false;
         }
 
-        // Cross-origin popup from a webpage is the #1 vector for streaming/donghua pop-under ads.
         if !source_host.is_empty() && root_domain(&source_host) != root_domain(&target_host) {
             self.blocked_count.fetch_add(1, Ordering::Relaxed);
             return true;
@@ -342,12 +331,9 @@ impl AdBlocker {
     }
 
     pub fn allow_popup_site(&self, host: &str) {
-        let host_lower = host.trim().to_lowercase();
-        if !host_lower.is_empty() {
-            self.popup_allowlist_hosts
-                .write()
-                .unwrap()
-                .insert(host_lower);
+        let key = host.trim().to_lowercase();
+        if !key.is_empty() {
+            self.popup_allowlist_hosts.write().unwrap().insert(key);
         }
     }
 
@@ -358,10 +344,8 @@ impl AdBlocker {
             .contains(&host.trim().to_lowercase())
     }
 
-    pub fn blocked_domains_json(&self) -> String {
-        let domains = self.blocked_domains.read().unwrap();
-        let list: Vec<&String> = domains.iter().collect();
-        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+    pub fn blocked_domains_json(&self) -> &str {
+        &self.blocked_domains_json
     }
 }
 
@@ -376,10 +360,7 @@ fn toggle_set_entry(lock: &RwLock<HashSet<String>>, host: &str) -> bool {
     }
 }
 
-/// Generates the lightweight initialization script injected into every content tab webview:
-/// 1. Network-level fetch/XHR ad & tracker blocking
-/// 2. Anti pop-under `window.open` & invisible full-screen click-overlay neutralizer
-/// 3. Cosmetic ad-hiding CSS (zero layout thrash)
+/// Generates the lightweight initialization script injected into every content tab webview.
 pub fn build_tab_init_script(
     adblock_enabled: bool,
     popup_blocker_enabled: bool,
@@ -395,8 +376,8 @@ pub fn build_tab_init_script(
   if (window.__VIBROWSE_ADBLOCK__) return;
   window.__VIBROWSE_ADBLOCK__ = true;
 
-  const ADBLOCK_ON = {adblock_on};
-  const POPUP_BLOCK_ON = {popup_on};
+  const ADBLOCK_ON = {adblock_enabled};
+  const POPUP_BLOCK_ON = {popup_blocker_enabled};
   const BLOCKED_DOMAINS = new Set({blocked_domains_json});
 
   function isBlockedHost(urlStr) {{
@@ -414,10 +395,9 @@ pub fn build_tab_init_script(
   }}
 
   if (ADBLOCK_ON) {{
-    // 1. Intercept fetch()
     const origFetch = window.fetch;
     if (origFetch) {{
-      window.fetch = function(input, init) {{
+      window.fetch = function(input) {{
         const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
         if (url && isBlockedHost(url)) {{
           return Promise.resolve(new Response('', {{ status: 204, statusText: 'Blocked by ViBrowse' }}));
@@ -426,7 +406,6 @@ pub fn build_tab_init_script(
       }};
     }}
 
-    // 2. Intercept XMLHttpRequest
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url) {{
       if (url && isBlockedHost(String(url))) {{
@@ -435,7 +414,6 @@ pub fn build_tab_init_script(
       return origOpen.apply(this, arguments);
     }};
 
-    // 3. Lightweight cosmetic ad hiding
     const style = document.createElement('style');
     style.id = 'vibrowse-adblock-css';
     style.textContent = `
@@ -462,16 +440,12 @@ pub fn build_tab_init_script(
   }}
 
   if (POPUP_BLOCK_ON) {{
-    // 4. Neutralize invisible click-hijack pop-under overlays on streaming sites
     const origWindowOpen = window.open;
     window.open = function(url) {{
-      if (url && isBlockedHost(String(url))) {{
-        return null;
-      }}
+      if (url && isBlockedHost(String(url))) return null;
       return origWindowOpen.apply(this, arguments);
     }};
 
-    // Remove transparent full-screen click-trap <a>/<div> overlays on first click
     document.addEventListener('mousedown', function(e) {{
       const el = e.target;
       if (!el || !el.getBoundingClientRect) return;
@@ -493,13 +467,6 @@ pub fn build_tab_init_script(
     }}, true);
   }}
 }})();
-"#,
-        adblock_on = if adblock_enabled { "true" } else { "false" },
-        popup_on = if popup_blocker_enabled {
-            "true"
-        } else {
-            "false"
-        },
-        blocked_domains_json = blocked_domains_json
+"#
     )
 }

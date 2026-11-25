@@ -1,6 +1,6 @@
-# 04 — Panduan Build, Packaging Rilis (Windows & Linux), & Roadmap
+# 03 — Panduan Build, Packaging Rilis (Windows & Linux), & Roadmap
 
-Dokumen ini berisi panduan praktis untuk mem-build **ViBrowse V1.1.a** di Windows maupun Linux (`.deb` & `.rpm`), struktur distribusi `release/`, serta rencana pengembangan lanjutan.
+Dokumen ini berisi panduan praktis untuk mem-build **ViBrowse V1.2a** di Windows maupun Linux (`.deb` & `.rpm`), struktur distribusi `release/`, serta rencana pengembangan lanjutan.
 
 ---
 
@@ -9,11 +9,11 @@ Dokumen ini berisi panduan praktis untuk mem-build **ViBrowse V1.1.a** di Window
 ```text
 release/
 ├── windows/
-│   ├── ViBrowse-V1.1.a-Setup.exe      # (2.45 MB) Installer Windows otomatis + Desktop/Start Menu shortcut + Uninstaller + auto-check WebView2
-│   └── ViBrowse-V1.1.a-Portable.zip   # (2.91 MB) Versi Portable siap ekstrak (vibrowse.exe + WebView2Loader.dll + README.txt)
+│   ├── ViBrowse-V1.2a-Setup.exe      # (~2.45 MB) Installer Windows otomatis + Desktop/Start Menu shortcut + Uninstaller + auto-check WebView2
+│   └── ViBrowse-V1.2a-Portable.zip   # (~2.91 MB) Versi Portable siap ekstrak (vibrowse.exe + WebView2Loader.dll + README.txt)
 ├── linux/
-│   ├── ViBrowse-V1.1.a-linux-amd64.deb    # Paket instalasi Debian / Ubuntu / Mint / Pop!_OS
-│   └── ViBrowse-V1.1.a-linux-x86_64.rpm   # Paket instalasi Fedora / RHEL / openSUSE / Rocky
+│   ├── ViBrowse-V1.2a-linux-amd64.deb    # Paket instalasi Debian / Ubuntu / Mint / Pop!_OS
+│   └── ViBrowse-V1.2a-linux-x86_64.rpm   # Paket instalasi Fedora / RHEL / openSUSE / Rocky
 └── android/
     └── README.md                          # Folder target rilis APK Android
 ```

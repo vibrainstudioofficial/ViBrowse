@@ -1,5 +1,6 @@
-# Rust / Cargo build artifacts
+# Rust / Cargo build artifacts & Tauri generated schemas
 /target/
+/gen/
 
 # OS & editor files
 .DS_Store

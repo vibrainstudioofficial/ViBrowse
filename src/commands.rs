@@ -1,5 +1,5 @@
 use crate::downloader::{DownloadTaskDto, EngineStatusDto};
-use crate::state::{is_internal_url, AppState, BrowserSnapshot};
+use crate::state::{is_internal_url, tab_label, AppState, BrowserSnapshot};
 use crate::storage::{Bookmark, BrowserSettings, HistoryEntry, OmniboxSuggestion};
 use crate::tabs::{
     close_tab, create_tab, emit_state, layout_webviews, navigate_tab, sleep_all_inactive_tabs,
@@ -9,7 +9,7 @@ use crate::util::extract_host;
 use tauri::{AppHandle, Manager, State};
 
 fn eval_in_tab(app: &AppHandle, tab_id: &str, js: &str) {
-    if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+    if let Some(wv) = app.get_webview(&tab_label(tab_id)) {
         let _ = wv.eval(js);
     }
 }
@@ -83,11 +83,9 @@ pub fn cmd_tab_zoom(
     reset: Option<bool>,
 ) -> Result<f64, String> {
     let new_zoom = {
-        let mut guard = state.inner.lock().unwrap();
-        let tab = guard
-            .tabs
-            .iter_mut()
-            .find(|t| t.id == tab_id)
+        let mut inner = state.inner.lock().unwrap();
+        let tab = inner
+            .tab_mut(&tab_id)
             .ok_or_else(|| "Tab not found".to_string())?;
         tab.zoom = if reset.unwrap_or(false) {
             1.0
@@ -96,7 +94,7 @@ pub fn cmd_tab_zoom(
         };
         tab.zoom
     };
-    if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+    if let Some(wv) = app.get_webview(&tab_label(&tab_id)) {
         let _ = wv.set_zoom(new_zoom);
     }
     emit_state(&app);
@@ -109,14 +107,7 @@ pub fn cmd_toggle_pin_tab(
     state: State<'_, AppState>,
     tab_id: String,
 ) -> Result<(), String> {
-    if let Some(tab) = state
-        .inner
-        .lock()
-        .unwrap()
-        .tabs
-        .iter_mut()
-        .find(|t| t.id == tab_id)
-    {
+    if let Some(tab) = state.inner.lock().unwrap().tab_mut(&tab_id) {
         tab.pinned = !tab.pinned;
     }
     emit_state(&app);
@@ -195,7 +186,7 @@ pub fn cmd_toggle_bookmark(
         state.storage.remove_bookmark_by_url(&url)?;
         false
     } else {
-        state.storage.add_bookmark(&title, &url, "Bookmarks Bar")?;
+        state.storage.add_bookmark(&title, &url)?;
         true
     };
     emit_state(&app);
@@ -318,11 +309,9 @@ pub async fn cmd_open_blocked_popup(
     always_allow_site: Option<bool>,
 ) -> Result<(), String> {
     let (popup_url, source_host) = {
-        let mut guard = state.inner.lock().unwrap();
-        let tab = guard
-            .tabs
-            .iter_mut()
-            .find(|t| t.id == tab_id)
+        let mut inner = state.inner.lock().unwrap();
+        let tab = inner
+            .tab_mut(&tab_id)
             .ok_or_else(|| "Tab not found".to_string())?;
         (
             tab.last_blocked_popup.take(),

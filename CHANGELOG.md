@@ -2,6 +2,22 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2a] — Refactoring Kode, Dokumentasi Referensi Variabel & Fungsi
+
+### Peningkatan & Refactoring
+- **Pembersihan Kode & Penghapusan Redundansi**:
+  - Menambahkan `TaskStatus` enum bertipe kuat, `DownloadTaskDto::new()`, `register_task()`, `update_task()`, dan `wait_if_paused()` di `src/downloader.rs` sehingga eliminasi duplikasi mutasi status download dan penyeragaman `tauri::async_runtime::spawn`.
+  - Menghapus `RwLock` yang tidak perlu pada `blocked_domains` di `src/adblock.rs` serta prekomputasi JSON domain blokir satu kali saat startup.
+  - Menambahkan helper `InnerState::tab()`, `InnerState::tab_mut()`, `tab_label()` di `src/state.rs` serta menyederhanakan loop layout di `src/tabs.rs` dan command di `src/commands.rs`.
+  - Menghapus field/parameter tak terpakai (`homepage` di `BrowserSettings`, `folder` di `add_bookmark`, `ICONS.check` di `ui/app.js`).
+  - Merapikan `ui/app.js` dengan helper `isInternal()`, `withTab()`, `createBadge()`, `saveSettings()`, `SHORTCUTS`, dan binding panel berbasis `data-panel`.
+  - Menambahkan `/gen/` ke `.gitignore` agar artefak build Tauri tidak ikut ter-commit.
+- **Dokumentasi Baru & Perbaikan GitHub**:
+  - Menambahkan **[05-referensi-variabel-dan-fungsi.md](dokumen/05-referensi-variabel-dan-fungsi.md)** berisi peta lengkap konstanta, struct/enum, variabel, fungsi Rust & JS, serta event IPC.
+  - Merapikan urutan dokumentasi `dokumen/01` s.d. `05` dan memperbaiki tampilan logo serta tautan rilis di `README.md`.
+
+---
+
 ## [V1.1.a] — Rilis Publik Perdana
 
 ### Fitur Utama

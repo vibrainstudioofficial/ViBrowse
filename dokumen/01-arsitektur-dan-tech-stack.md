@@ -1,8 +1,8 @@
-# 01 — Arsitektur Sistem, Pemilihan Library, & Tech Stack (V1.1.a)
+# 01 — Arsitektur Sistem, Pemilihan Library, & Tech Stack (V1.2a)
 
-Dokumen ini menjelaskan secara menyeluruh **mengapa setiap teknologi, engine, dan library/crate dipilih** dalam pembangunan **ViBrowse V1.1.a**, bagaimana arsitektur Multi-WebView bekerja, serta bagaimana ukuran installer berhasil ditekan hingga **2.45 MB** meskipun memuat browser modern + SQLite + Ad-Blocker + IDM 16-koneksi + klien BitTorrent penuh.
+Dokumen ini menjelaskan secara menyeluruh **mengapa setiap teknologi, engine, dan library/crate dipilih** dalam pembangunan **ViBrowse V1.2a**, bagaimana arsitektur Multi-WebView bekerja, serta bagaimana ukuran installer berhasil ditekan hingga **~2.45 MB** meskipun memuat browser modern + SQLite + Ad-Blocker + IDM 16-koneksi + klien BitTorrent penuh.
 
-> Untuk pembahasan super detail mengenai perbandingan **WebView2 vs Chromium mentah (CEF) vs WebKitGTK (`libwebkit2gtk`) di Linux vs Android System WebView**, baca juga dokumen khusus: **[05-bedah-engine-webview-dan-lintas-platform.md](./05-bedah-engine-webview-dan-lintas-platform.md)**.
+> Untuk pembahasan super detail mengenai perbandingan **WebView2 vs Chromium mentah (CEF) vs WebKitGTK (`libwebkit2gtk`) di Linux vs Android System WebView**, baca juga dokumen khusus: **[04-bedah-engine-webview-dan-lintas-platform.md](./04-bedah-engine-webview-dan-lintas-platform.md)**.
 
 ---
 

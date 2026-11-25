@@ -10,7 +10,6 @@ pub struct Bookmark {
     pub id: i64,
     pub title: String,
     pub url: String,
-    pub folder: String,
     pub created_at: String,
 }
 
@@ -46,7 +45,6 @@ pub struct BrowserSettings {
     #[serde(default = "default_true")]
     pub popup_blocker_enabled: bool,
     pub show_bookmarks_bar: bool,
-    pub homepage: String,
     #[serde(default = "default_theme")]
     pub theme: String, // "dark" | "light"
 }
@@ -59,7 +57,6 @@ impl Default for BrowserSettings {
             adblock_enabled: true,
             popup_blocker_enabled: true,
             show_bookmarks_bar: true,
-            homepage: "vibrowse://newtab".to_string(),
             theme: "dark".to_string(),
         }
     }
@@ -117,7 +114,7 @@ impl Storage {
                 ("Wikipedia", "https://www.wikipedia.org"),
             ] {
                 let _ = conn.execute(
-                    "INSERT OR IGNORE INTO bookmarks (title, url, folder, created_at) VALUES (?1, ?2, 'Bookmarks Bar', ?3)",
+                    "INSERT OR IGNORE INTO bookmarks (title, url, created_at) VALUES (?1, ?2, ?3)",
                     params![title, url, now],
                 );
             }
@@ -132,8 +129,8 @@ impl Storage {
 
     pub fn list_bookmarks(&self) -> Vec<Bookmark> {
         let conn = self.conn.lock().unwrap();
-        let Ok(mut stmt) = conn
-            .prepare("SELECT id, title, url, folder, created_at FROM bookmarks ORDER BY id DESC")
+        let Ok(mut stmt) =
+            conn.prepare("SELECT id, title, url, created_at FROM bookmarks ORDER BY id DESC")
         else {
             return vec![];
         };
@@ -142,15 +139,13 @@ impl Storage {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 url: row.get(2)?,
-                folder: row.get(3)?,
-                created_at: row.get(4)?,
+                created_at: row.get(3)?,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default()
     }
 
-    /// Fetches all bookmarked URLs in a single query to avoid N+1 lookups during state snapshots.
     pub fn bookmarked_urls_set(&self) -> HashSet<String> {
         let conn = self.conn.lock().unwrap();
         let Ok(mut stmt) = conn.prepare("SELECT url FROM bookmarks") else {
@@ -161,22 +156,15 @@ impl Storage {
             .unwrap_or_default()
     }
 
-    pub fn add_bookmark(&self, title: &str, url: &str, folder: &str) -> Result<Bookmark, String> {
+    pub fn add_bookmark(&self, title: &str, url: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
-        let now = now_iso();
         conn.execute(
-            "INSERT INTO bookmarks (title, url, folder, created_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(url) DO UPDATE SET title = excluded.title, folder = excluded.folder",
-            params![title, url, folder, now],
+            "INSERT INTO bookmarks (title, url, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(url) DO UPDATE SET title = excluded.title",
+            params![title, url, now_iso()],
         )
         .map_err(|e| e.to_string())?;
-        Ok(Bookmark {
-            id: conn.last_insert_rowid(),
-            title: title.to_string(),
-            url: url.to_string(),
-            folder: folder.to_string(),
-            created_at: now,
-        })
+        Ok(())
     }
 
     pub fn remove_bookmark_by_url(&self, url: &str) -> Result<(), String> {

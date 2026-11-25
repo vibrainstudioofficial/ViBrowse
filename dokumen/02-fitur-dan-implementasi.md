@@ -1,6 +1,6 @@
-# 02 — Spesifikasi Fitur & Detail Implementasi (V1.1.a)
+# 02 — Spesifikasi Fitur & Detail Implementasi (V1.2a)
 
-Dokumen ini membedah secara mendetail seluruh fitur yang tersedia di **ViBrowse V1.1.a**, cara kerjanya di backend Rust & frontend UI, serta daftar lengkap seluruh **39 Tauri IPC commands**.
+Dokumen ini membedah secara mendetail seluruh fitur yang tersedia di **ViBrowse V1.2a**, cara kerjanya di backend Rust & frontend UI, serta daftar lengkap seluruh **41 Tauri IPC commands** (lihat juga peta simbol lengkap di [05-referensi-variabel-dan-fungsi.md](./05-referensi-variabel-dan-fungsi.md)).
 
 ---
 
