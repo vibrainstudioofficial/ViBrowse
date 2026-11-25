@@ -238,6 +238,17 @@ function renderToolbar() {
       }
     }
   }
+
+  const profNameEl = $('profile-name');
+  const profDotEl = $('profile-dot');
+  if (profNameEl && profDotEl) {
+    const profiles = state.settings.profiles || [];
+    const activeProf = profiles.find((p) => p.id === state.settings.active_profile_id) || profiles[0];
+    if (activeProf) {
+      profNameEl.textContent = activeProf.name;
+      profDotEl.style.background = activeProf.color || '#3b82f6';
+    }
+  }
   if (tab && tab.last_blocked_popup) {
     popupBtn.title = `Popup diblokir: ${tab.last_blocked_popup} — Klik untuk kelola/buka`;
   }
@@ -687,7 +698,7 @@ function renderSettingsPanel(body) {
             ? state.available_update.has_update
               ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
               : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
-            : 'Versi terpasang: V1.2a'
+            : 'Versi terpasang: V1.2.1'
       }</div>
       <div class="panel-row">
         <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>
@@ -695,7 +706,8 @@ function renderSettingsPanel(body) {
       </div>
     </div>
     <div class="setting-group">
-      <strong>Actions</strong>
+      <strong>Actions &amp; Privacy</strong>
+      <button id="btn-clear-browsing-data" class="btn btn-danger btn-with-icon">${iconSvg('trash')}<span>Clear Cache &amp; Cookies (Logout Semua Akun)</span></button>
       <button id="btn-sleep-all" class="btn btn-primary btn-with-icon">${iconSvg('sleep')}<span>Sleep All Inactive Tabs Now</span></button>
       <button id="btn-open-about" class="btn btn-with-icon">${iconSvg('info')}<span>About ViBrowse</span></button>
     </div>
@@ -757,10 +769,98 @@ function renderSettingsPanel(body) {
   if (instUpdBtn) {
     instUpdBtn.onclick = () => invoke('cmd_install_update').catch((err) => alert(String(err)));
   }
+  $('btn-clear-browsing-data').onclick = async () => {
+    try {
+      await invoke('cmd_clear_browsing_data');
+      alert('Cache, cookies, dan sesi login (termasuk Google) pada profil aktif berhasil dibersihkan.');
+    } catch (err) {
+      alert(String(err));
+    }
+  };
   $('btn-sleep-all').onclick = () => invoke('cmd_sleep_inactive_tabs');
   $('btn-open-about').onclick = () => {
     invoke('cmd_set_panel', { panel: null });
     invoke('cmd_new_tab', { url: ABOUT_URL, incognito: false });
+  };
+}
+
+function renderProfilesPanel(body) {
+  const profiles = state.settings.profiles || [{ id: 'default', name: 'Default', color: '#3b82f6' }];
+  const activeId = state.settings.active_profile_id || 'default';
+
+  body.innerHTML = `
+    <div class="setting-group">
+      <strong>Profil Browser Terisolasi</strong>
+      <div class="muted">Setiap profil menyimpan sesi login (Google, dll.), cookies, dan cache secara terpisah.</div>
+      <div id="profiles-list" class="panel-stack"></div>
+    </div>
+    <div class="setting-group">
+      <strong>Buat Profil Baru</strong>
+      <div class="panel-row">
+        <input id="new-profile-name" class="panel-search" placeholder="Nama profil (mis. Kerja, Pribadi)..." />
+        <input id="new-profile-color" type="color" value="#10b981" title="Warna profil" style="width:36px;height:34px;border:none;background:transparent;cursor:pointer;" />
+      </div>
+      <button id="btn-create-profile" class="btn btn-primary">Tambah Profil</button>
+    </div>
+    <div class="setting-group">
+      <strong>Bersihkan Data Profil Aktif</strong>
+      <div class="muted">Hapus cache, cookies, dan paksa logout semua akun (Google, YouTube, dll.) di profil ini.</div>
+      <button id="btn-profile-clear-cache" class="btn btn-danger">Clear Cache &amp; Cookies (Logout Semua)</button>
+    </div>
+  `;
+
+  const listEl = $('profiles-list');
+  for (const prof of profiles) {
+    const isActive = prof.id === activeId;
+    const el = document.createElement('div');
+    el.className = 'panel-list-item';
+    el.innerHTML = `
+      <div class="panel-item-main" style="display:flex;align-items:center;gap:8px;">
+        <span class="profile-dot" style="background:${escapeHtml(prof.color || '#3b82f6')};width:11px;height:11px;"></span>
+        <div>
+          <div class="panel-item-title">${escapeHtml(prof.name)} ${isActive ? '<span class="badge">Aktif</span>' : ''}</div>
+          <div class="panel-item-sub">${prof.id === 'default' ? 'Profil utama' : 'Folder terisolasi: profiles/' + escapeHtml(prof.id)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;">
+        ${isActive ? '' : '<button class="btn btn-primary btn-switch-prof">Pakai</button>'}
+        ${prof.id === 'default' ? '' : `<button class="icon-btn btn-del-prof" title="Hapus profil">${iconSvg('close')}</button>`}
+      </div>
+    `;
+    const swBtn = el.querySelector('.btn-switch-prof');
+    if (swBtn) {
+      swBtn.onclick = () => invoke('cmd_switch_profile', { profileId: prof.id }).catch((e) => alert(String(e)));
+    }
+    const delBtn = el.querySelector('.btn-del-prof');
+    if (delBtn) {
+      delBtn.onclick = () => {
+        if (confirm(`Hapus profil "${prof.name}" beserta seluruh data login & cache-nya?`)) {
+          invoke('cmd_delete_profile', { profileId: prof.id }).catch((e) => alert(String(e)));
+        }
+      };
+    }
+    listEl.appendChild(el);
+  }
+
+  $('btn-create-profile').onclick = async () => {
+    const name = $('new-profile-name').value.trim();
+    const color = $('new-profile-color').value || '#10b981';
+    if (!name) return;
+    try {
+      const created = await invoke('cmd_create_profile', { name, color });
+      await invoke('cmd_switch_profile', { profileId: created.id });
+    } catch (err) {
+      alert(String(err));
+    }
+  };
+
+  $('btn-profile-clear-cache').onclick = async () => {
+    try {
+      await invoke('cmd_clear_browsing_data');
+      alert('Cache, cookies, dan sesi login Google/situs di profil aktif berhasil dibersihkan.');
+    } catch (err) {
+      alert(String(err));
+    }
   };
 }
 
@@ -769,6 +869,7 @@ const PANEL_RENDERERS = {
   history: { icon: 'history', title: 'History', render: renderHistoryPanel },
   downloads: { icon: 'download', title: 'Downloads & Media', render: renderDownloadsPanel },
   adblock: { icon: 'shield', title: 'Ad & Popup Blocker', render: renderAdblockPanel },
+  profiles: { icon: 'incognito', title: 'Profiles & Privacy', render: renderProfilesPanel },
   settings: { icon: 'settings', title: 'Settings', render: renderSettingsPanel },
 };
 

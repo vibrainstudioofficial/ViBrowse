@@ -296,9 +296,15 @@ fn spawn_tab_webview(
         state.adblock.blocked_domains_json(),
     );
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
+    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
         .incognito(is_incognito)
-        .initialization_script(&init_script)
+        .initialization_script(&init_script);
+    if !is_incognito {
+        if let Some(profile_dir) = state.active_profile_data_dir() {
+            builder = builder.data_directory(profile_dir);
+        }
+    }
+    let builder = builder
         .on_navigation({
             let app = app.clone();
             let id = tab_id.to_string();
@@ -904,4 +910,97 @@ pub fn start_tab_sleeper_loop(app: AppHandle) {
             }
         }
     });
+}
+
+/// Clears all cookies, cache, localStorage, and active login sessions (e.g. Google/YouTube)
+/// for the current profile and reloads the active tab.
+pub fn clear_browsing_data(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (tab_labels, active_label, is_default_profile) = {
+        let inner = state.inner.lock().unwrap();
+        let labels: Vec<String> = inner
+            .tabs
+            .iter()
+            .filter(|t| t.has_webview && !t.is_incognito)
+            .map(|t| t.webview_label())
+            .collect();
+        let active = inner
+            .active_tab_id
+            .as_ref()
+            .and_then(|aid| inner.tab(aid))
+            .filter(|t| t.has_webview)
+            .map(|t| t.webview_label());
+        let is_def = inner.settings.active_profile_id == "default"
+            || inner.settings.active_profile_id.is_empty();
+        (labels, active, is_def)
+    };
+
+    let mut cleared = false;
+    for label in &tab_labels {
+        if let Some(wv) = app.get_webview(label) {
+            if wv.clear_all_browsing_data().is_ok() {
+                cleared = true;
+                break;
+            }
+        }
+    }
+    if !cleared && is_default_profile {
+        if let Some(chrome) = app.get_webview("chrome") {
+            chrome
+                .clear_all_browsing_data()
+                .map_err(|e| format!("Gagal membersihkan cache & cookies: {}", e))?;
+            cleared = true;
+        }
+    }
+    if !cleared {
+        // Fallback for custom profile with no open content tabs yet: remove its cache/cookies dir.
+        if let Some(dir) = state.active_profile_data_dir() {
+            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::create_dir_all(&dir);
+        }
+    }
+
+    if let Some(label) = active_label {
+        if let Some(wv) = app.get_webview(&label) {
+            let _ = wv.eval("window.location.reload()");
+        }
+    }
+    Ok(())
+}
+
+/// Switches to another isolated browser profile: closes all current tab webviews,
+/// persists the selected profile, and opens a clean New Tab in that profile.
+pub fn switch_profile(app: &AppHandle, profile_id: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (labels_to_close, settings_to_save) = {
+        let mut inner = state.inner.lock().unwrap();
+        if !inner.settings.profiles.iter().any(|p| p.id == profile_id) {
+            return Err("Profil tidak ditemukan".to_string());
+        }
+        if inner.settings.active_profile_id == profile_id {
+            return Ok(());
+        }
+        let labels: Vec<String> = inner
+            .tabs
+            .iter()
+            .filter(|t| t.has_webview)
+            .map(|t| t.webview_label())
+            .collect();
+        inner.tabs.clear();
+        inner.active_tab_id = None;
+        inner.closed_tabs.clear();
+        inner.settings.active_profile_id = profile_id.to_string();
+        (labels, inner.settings.clone())
+    };
+
+    for label in labels_to_close {
+        if let Some(wv) = app.get_webview(&label) {
+            let _ = wv.close();
+        }
+    }
+    state.storage.save_settings(&settings_to_save)?;
+    let _ = create_tab(app, None, false, true);
+    layout_webviews(app);
+    emit_state(app);
+    Ok(())
 }

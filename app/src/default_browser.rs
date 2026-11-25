@@ -110,23 +110,26 @@ pub fn register_browser() {}
 pub fn is_default_browser() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let mut cmd = Command::new("reg.exe");
-        cmd.args([
-            "query",
+        // Windows 11 24H2+ stores the active ProgId under `UserChoiceLatest\ProgId`
+        // while keeping legacy `UserChoice` at the previous browser. Check Latest first!
+        let keys = [
+            r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoiceLatest\ProgId",
             r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
-            "/v",
-            "ProgId",
-        ])
-        .creation_flags(CREATE_NO_WINDOW);
-        cmd.output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .to_lowercase()
-                    .contains("vibrowsehtml")
-            })
-            .unwrap_or(false)
+        ];
+        for key in keys {
+            let mut cmd = Command::new("reg.exe");
+            cmd.args(["query", key, "/v", "ProgId"])
+                .creation_flags(CREATE_NO_WINDOW);
+            if let Ok(out) = cmd.output() {
+                if out.status.success() {
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+                    if stdout.contains("progid") {
+                        return stdout.contains("vibrowse");
+                    }
+                }
+            }
+        }
+        false
     }
 
     #[cfg(target_os = "linux")]

@@ -140,6 +140,7 @@ pub struct AppState {
     pub storage: Storage,
     pub adblock: AdBlocker,
     pub dm: DownloadManager,
+    pub app_data_dir: PathBuf,
 }
 
 impl AppState {
@@ -164,7 +165,26 @@ impl AppState {
             }),
             storage,
             adblock: AdBlocker::new(),
-            dm: DownloadManager::new(app_data_dir),
+            dm: DownloadManager::new(app_data_dir.clone()),
+            app_data_dir,
+        }
+    }
+
+    /// Returns a dedicated data directory for non-default profiles so cookies/logins are isolated.
+    pub fn active_profile_data_dir(&self) -> Option<PathBuf> {
+        let id = self
+            .inner
+            .lock()
+            .unwrap()
+            .settings
+            .active_profile_id
+            .clone();
+        if id.is_empty() || id == "default" {
+            None
+        } else {
+            let dir = self.app_data_dir.join("profiles").join(id);
+            let _ = std::fs::create_dir_all(&dir);
+            Some(dir)
         }
     }
 

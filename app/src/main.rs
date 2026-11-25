@@ -144,6 +144,10 @@ fn main() {
             commands::cmd_check_update,
             commands::cmd_install_update,
             commands::cmd_dismiss_update_banner,
+            commands::cmd_clear_browsing_data,
+            commands::cmd_create_profile,
+            commands::cmd_switch_profile,
+            commands::cmd_delete_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ViBrowse");

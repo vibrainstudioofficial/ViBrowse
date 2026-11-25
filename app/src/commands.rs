@@ -533,3 +533,66 @@ pub fn cmd_dismiss_update_banner(app: AppHandle, state: State<'_, AppState>) {
     layout_webviews(&app);
     emit_state(&app);
 }
+
+#[tauri::command]
+pub fn cmd_clear_browsing_data(app: AppHandle) -> Result<(), String> {
+    crate::tabs::clear_browsing_data(&app)
+}
+
+#[tauri::command]
+pub fn cmd_create_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    color: Option<String>,
+) -> Result<crate::storage::BrowserProfile, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Nama profil tidak boleh kosong".to_string());
+    }
+    let profile = crate::storage::BrowserProfile {
+        id: crate::util::short_id(),
+        name: trimmed.to_string(),
+        color: color.unwrap_or_else(|| "#10b981".to_string()),
+    };
+    let settings = {
+        let mut inner = state.inner.lock().unwrap();
+        inner.settings.profiles.push(profile.clone());
+        inner.settings.clone()
+    };
+    state.storage.save_settings(&settings)?;
+    emit_state(&app);
+    Ok(profile)
+}
+
+#[tauri::command]
+pub fn cmd_switch_profile(app: AppHandle, profile_id: String) -> Result<(), String> {
+    crate::tabs::switch_profile(&app, &profile_id)
+}
+
+#[tauri::command]
+pub fn cmd_delete_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), String> {
+    if profile_id == "default" {
+        return Err("Profil Default tidak dapat dihapus".to_string());
+    }
+    let was_active = state.inner.lock().unwrap().settings.active_profile_id == profile_id;
+    if was_active {
+        crate::tabs::switch_profile(&app, "default")?;
+    }
+    let settings = {
+        let mut inner = state.inner.lock().unwrap();
+        inner.settings.profiles.retain(|p| p.id != profile_id);
+        inner.settings.clone()
+    };
+    state.storage.save_settings(&settings)?;
+    let dir = state.app_data_dir.join("profiles").join(&profile_id);
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    emit_state(&app);
+    Ok(())
+}

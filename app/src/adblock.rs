@@ -170,11 +170,19 @@ const BLOCKED_URL_PATTERNS: &[&str] = &[
     "histats.com/js",
 ];
 
-/// Trusted auth/login hosts that should never be blocked by cross-origin popup protection.
+/// Trusted auth/login/logout hosts that should never be blocked by cross-origin popup protection.
 const SAFE_POPUP_HOSTS: &[&str] = &[
     "accounts.google.com",
+    "accounts.youtube.com",
+    "myaccount.google.com",
+    "mail.google.com",
+    "ogs.google.com",
+    "google.com",
+    "google.co.id",
+    "youtube.com",
     "github.com",
     "login.microsoftonline.com",
+    "login.live.com",
     "appleid.apple.com",
     "discord.com",
     "oauth.telegram.org",

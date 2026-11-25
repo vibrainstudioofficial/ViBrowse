@@ -2,6 +2,17 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2.1] — Fix Google Logout, Clear Cache & Cookies, Profile Management, & Auto Update
+
+### Perbaikan & Fitur Baru
+- **Fix Login/Logout Google & YouTube**: Menambahkan seluruh domain autentikasi Google/YouTube (`accounts.youtube.com`, `myaccount.google.com`, `mail.google.com`, `ogs.google.com`, `google.com`, `google.co.id`, `youtube.com`) ke whitelist popup agar alur logout Google/YouTube tidak terblokir.
+- **Clear Cache & Cookies (1-Klik Logout Semua Akun)**: Fitur pembersihan cache, cookies, localStorage, dan sesi login aktif secara native (`Webview::clear_all_browsing_data`) melalui panel **Profiles & Privacy** dan **Settings**.
+- **Profile Management (Multi-Profil Terisolasi)**: Buat, pilih, dan hapus profil browser terpisah (dengan warna custom & folder `data_directory` terisolasi untuk cookies/login masing-masing profil) langsung dari toolbar.
+- **Default Browser Check & Auto Update**: Banner pengecekan Default Browser ala Chrome, dukungan argumen CLI URL, serta deteksi update otomatis via GitHub Releases + fallback `https://browse.vibrain.id/version.json`.
+- **Dual Mirror Download**: Seluruh paket Windows (`.exe`, `.zip`), Linux (`.deb`, `.rpm`), dan Source Code (`.zip`) tersedia sekaligus di **Cloudflare Edge (`browse.vibrain.id`)** dan **GitHub Releases**.
+
+---
+
 ## [V1.2a] — Refactoring Kode, Dokumentasi Referensi Variabel & Fungsi
 
 ### Peningkatan & Refactoring

@@ -21,7 +21,7 @@
   </table>
   <p><strong>Browser Desktop Modern yang Ultra-Ringan (~2.45 MB), Hemat RAM, &amp; Kompatibel Setara Google Chrome</strong></p>
   <p>
-    <a href="https://github.com/fransetiaone/ViBrowse/releases/latest"><img src="https://img.shields.io/badge/Release-V1.2a-2563eb?style=for-the-badge" alt="Version V1.2a" /></a>
+    <a href="https://browse.vibrain.id"><img src="https://img.shields.io/badge/Release-V1.2.1-2563eb?style=for-the-badge" alt="Version V1.2.1" /></a>
     <img src="https://img.shields.io/badge/Built%20With-Rust%20%2B%20Tauri%20v2-f97316?style=for-the-badge" alt="Rust + Tauri v2" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=for-the-badge" alt="GPL-3.0 License" /></a>
   </p>
@@ -52,16 +52,17 @@
 
 ---
 
-## Unduh Rilis Resmi (V1.2a)
+## Unduh Rilis Resmi (V1.2.1)
 
-Unduh paket siap pakai melalui halaman **[GitHub Releases](https://github.com/fransetiaone/ViBrowse/releases/latest)**:
+Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.id/#unduh)** maupun **[GitHub Releases](https://github.com/fransetiaone/ViBrowse/releases/latest)**:
 
-| Platform | Paket | Ukuran | Keterangan |
+| Platform | Paket | Ukuran | Tautan Unduh |
 | --- | --- | --- | --- |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2a-Setup.exe` | **2.45 MB** | Installer otomatis (Desktop & Start Menu shortcut, Uninstaller, deteksi otomatis WebView2, tanpa butuh Admin/UAC) |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2a-Portable.zip` | **2.91 MB** | Ekstrak & langsung jalankan `vibrowse.exe` |
-| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2a-linux-amd64.deb` | ~3–5 MB | Untuk Ubuntu, Debian, Linux Mint, Pop!_OS (`sudo apt install ./ViBrowse-*.deb`) |
-| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2a-linux-x86_64.rpm` | ~3–5 MB | Untuk Fedora, RHEL, openSUSE, Rocky (`sudo dnf install ./ViBrowse-*.rpm`) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.1-Setup.exe` | **~2.46 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-Setup.exe) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-Setup.exe) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.1-Portable.zip` | **~2.93 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-Portable.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-Portable.zip) |
+| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2.1-linux-amd64.deb` | ~3–5 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-linux-amd64.deb) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-linux-amd64.deb) |
+| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2.1-linux-x86_64.rpm` | ~3–5 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-linux-x86_64.rpm) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-linux-x86_64.rpm) |
+| **Source Code (Compile Sendiri)** | `ViBrowse-V1.2.1-source.zip` | ~1.7 MB | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.1-source.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.1/ViBrowse-V1.2.1-source.zip) |
 
 ---
 

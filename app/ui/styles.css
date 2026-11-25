@@ -637,6 +637,20 @@ html, body, #app {
   border-top-color: rgba(16, 185, 129, 0.35);
 }
 
+.profile-pill {
+  gap: 6px;
+  font-weight: 600;
+  padding: 0 9px;
+}
+
+.profile-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
 /* ---- WORKSPACE ---- */
 #workspace {
   flex: 1;

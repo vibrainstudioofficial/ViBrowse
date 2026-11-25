@@ -38,6 +38,25 @@ fn default_theme() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserProfile {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+}
+
+fn default_profiles() -> Vec<BrowserProfile> {
+    vec![BrowserProfile {
+        id: "default".to_string(),
+        name: "Default".to_string(),
+        color: "#3b82f6".to_string(),
+    }]
+}
+
+fn default_profile_id() -> String {
+    "default".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserSettings {
     pub search_engine: String,
     pub tab_sleep_minutes: u64, // 0 = disabled
@@ -49,6 +68,10 @@ pub struct BrowserSettings {
     pub theme: String, // "dark" | "light"
     #[serde(default = "default_true")]
     pub check_default_browser: bool,
+    #[serde(default = "default_profiles")]
+    pub profiles: Vec<BrowserProfile>,
+    #[serde(default = "default_profile_id")]
+    pub active_profile_id: String,
 }
 
 impl Default for BrowserSettings {
@@ -61,6 +84,8 @@ impl Default for BrowserSettings {
             show_bookmarks_bar: true,
             theme: "dark".to_string(),
             check_default_browser: true,
+            profiles: default_profiles(),
+            active_profile_id: default_profile_id(),
         }
     }
 }
