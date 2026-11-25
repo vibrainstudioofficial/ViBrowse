@@ -29,14 +29,10 @@
 
 ---
 
-## Struktur Repositori
+## Website Resmi & Struktur Repositori
 
-Repositori ini dibagi menjadi 2 folder utama:
-
-| Folder | Teknologi | Keterangan |
-| --- | --- | --- |
-| [`app/`](app/) | **Rust + Tauri v2** | Aplikasi desktop browser **ViBrowse**, dokumentasi teknis, skrip build Windows/Linux, dan paket rilis. |
-| [`landingpage/`](landingpage/) | **TypeScript + Vite** | Halaman landing resmi untuk informasi produk, halaman unduh, serta **live counter & statistik downloader** real-time. |
+- **Website / Landing Page**: **[https://browse.vibrain.id](https://browse.vibrain.id)**
+- **Source Code Aplikasi**: [`app/`](app/) — Proyek lengkap aplikasi desktop **ViBrowse** (Rust + Tauri v2, `src/`, `ui/`, `dokumen/`, `scripts/`, `release/`).
 
 ---
 
@@ -83,21 +79,11 @@ Seluruh pembahasan arsitektur, pemilihan library, cara kerja engine, hingga refe
 
 ## Cara Build dari Source Code
 
-### 1. Aplikasi Browser (`app/`)
 ```powershell
 cd app
 cargo run
 # Build release teroptimasi:
 cargo build --release
-```
-
-### 2. Landing Page (`landingpage/`)
-```powershell
-cd landingpage
-npm install
-npm run dev
-# Build produksi static (dist/):
-npm run build
 ```
 
 ---

@@ -2,9 +2,8 @@
 /app/target/
 /app/gen/
 
-# Landing page build artifacts & dependencies
-/landingpage/node_modules/
-/landingpage/dist/
+# Landing page (hosted separately on Cloudflare Workers: browse.vibrain.id)
+/landingpage/
 
 # OS & editor files
 .DS_Store

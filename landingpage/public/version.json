@@ -1,9 +1,0 @@
-{
-  "version": "V1.2a",
-  "release_url": "https://github.com/fransetiaone/ViBrowse/releases/tag/V1.2a",
-  "windows_setup": "https://github.com/fransetiaone/ViBrowse/releases/download/V1.2a/ViBrowse-V1.2a-Setup.exe",
-  "windows_portable": "https://github.com/fransetiaone/ViBrowse/releases/download/V1.2a/ViBrowse-V1.2a-Portable.zip",
-  "linux_deb": "https://github.com/fransetiaone/ViBrowse/releases/download/V1.2a/ViBrowse-V1.2a-linux-amd64.deb",
-  "linux_rpm": "https://github.com/fransetiaone/ViBrowse/releases/download/V1.2a/ViBrowse-V1.2a-linux-x86_64.rpm",
-  "notes": "ViBrowse V1.2a — Auto Update, Default Browser Check, YouTube/IDM Floating Downloader, & Code Refactoring."
-}
