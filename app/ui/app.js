@@ -323,12 +323,16 @@ function renderNewTabPage() {
 function renderInternalPages() {
   const tab = activeTab();
   const url = tab ? tab.url : NEWTAB_URL;
+  const internal = isInternal(url);
   const isDm = url === DOWNLOADS_URL;
   const isAbout = url === ABOUT_URL;
+  const isNtp = url === NEWTAB_URL;
 
+  const ws = $('workspace');
+  if (ws) ws.classList.toggle('hidden', !internal);
   $('downloads-page').classList.toggle('hidden', !isDm);
   $('about-page').classList.toggle('hidden', !isAbout);
-  $('newtab-page').classList.toggle('hidden', isDm || isAbout);
+  $('newtab-page').classList.toggle('hidden', !isNtp);
 
   if (isAbout) {
     $('about-theme-val').textContent = state.settings.theme === 'light' ? 'Light Mode' : 'Dark Mode';
@@ -728,7 +732,7 @@ function renderSettingsPanel(body) {
             ? state.available_update.has_update
               ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
               : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
-            : 'Versi terpasang: V1.2.2'
+            : 'Versi terpasang: V1.2.3'
       }</div>
       <div class="panel-row">
         <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>

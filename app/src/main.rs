@@ -18,6 +18,14 @@ use tauri::window::WindowBuilder;
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WindowEvent};
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        // Prevent WebKitGTK 4.1 DMABUF compositing/repaint glitches on Ubuntu 24.04 / Linux Mint 22.x
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let data_dir = app
@@ -29,15 +37,42 @@ fn main() {
                 Storage::open(db_path).expect("Failed to initialize ViBrowse SQLite database");
             app.manage(AppState::new(storage, data_dir));
 
-            let init_w = 1320.0;
-            let init_h = 840.0;
+            let init_w = 1180.0;
+            let init_h = 680.0;
 
             let window = WindowBuilder::new(app, "main")
                 .title("ViBrowse")
                 .inner_size(init_w, init_h)
-                .min_inner_size(760.0, 500.0)
+                .min_inner_size(640.0, 420.0)
+                .resizable(true)
                 .center()
                 .build()?;
+
+            #[cfg(target_os = "linux")]
+            {
+                use gtk::prelude::GtkWindowExt;
+                if let Ok(gtk_win) = window.gtk_window() {
+                    gtk_win.set_resizable(true);
+                    let geom = gdk::Geometry::new(
+                        640,
+                        420,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0.0,
+                        0.0,
+                        gdk::Gravity::NorthWest,
+                    );
+                    gtk_win.set_geometry_hints(
+                        None::<&gtk::Widget>,
+                        Some(&geom),
+                        gdk::WindowHints::MIN_SIZE,
+                    );
+                }
+            }
 
             window.add_child(
                 WebviewBuilder::new("chrome", WebviewUrl::App("index.html".into())),

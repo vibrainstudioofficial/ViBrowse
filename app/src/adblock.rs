@@ -215,11 +215,34 @@ const SAFE_POPUP_HOSTS: &[&str] = &[
     "oauth.telegram.org",
 ];
 
-/// Auth hosts whose subresources must never be broken by aggressive third-party rules.
+/// Auth & Google Workspace hosts whose subresources must never be broken by aggressive rules.
 const PROTECTED_AUTH_HOSTS: &[&str] = &[
     "accounts.google.com",
     "accounts.youtube.com",
     "myaccount.google.com",
+    "drive.google.com",
+    "docs.google.com",
+    "sheets.google.com",
+    "slides.google.com",
+    "forms.google.com",
+    "calendar.google.com",
+    "mail.google.com",
+    "meet.google.com",
+    "contacts.google.com",
+    "keep.google.com",
+    "photos.google.com",
+    "ogs.google.com",
+    "apis.google.com",
+    "googleapis.com",
+    "clients1.google.com",
+    "clients2.google.com",
+    "clients3.google.com",
+    "clients4.google.com",
+    "clients5.google.com",
+    "clients6.google.com",
+    "play.google.com",
+    "gstatic.com",
+    "googleusercontent.com",
     "login.microsoftonline.com",
     "login.live.com",
     "appleid.apple.com",
@@ -411,7 +434,7 @@ impl AdBlocker {
 
     async fn sync_filters_inner(&self) -> Result<AdblockStatusDto, String> {
         let client = reqwest::Client::builder()
-            .user_agent("ViBrowse/1.2.2 (adblock-rust)")
+            .user_agent("ViBrowse/1.2.3 (adblock-rust)")
             .timeout(Duration::from_secs(25))
             .build()
             .map_err(|e| format!("HTTP client error: {}", e))?;
@@ -711,7 +734,9 @@ pub fn build_tab_init_script(
     return false;
   }}
 
-  if (ADBLOCK_ON) {{
+  const IS_WORKSPACE_HOST = /(^|\.)(drive|docs|sheets|slides|forms|calendar|mail|meet|accounts|myaccount)\.google\.com$/i.test(location.hostname);
+
+  if (ADBLOCK_ON && !IS_WORKSPACE_HOST) {{
     const origFetch = window.fetch;
     if (origFetch) {{
       window.fetch = function(input) {{

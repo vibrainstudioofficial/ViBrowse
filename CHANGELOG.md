@@ -2,6 +2,19 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2.3] — Fix Google Drive/Docs/Sheets, Linux Mint GTK3 Maximize & WebKitGTK Repaint
+
+### Perbaikan Bug
+- **Fix Google Drive, Google Sheets, & Google Docs (Windows & Linux)**: Melindungi seluruh host Google Workspace (`drive/docs/sheets/slides/forms/calendar/mail/meet/apis/clients*/gstatic/googleusercontent`) dari intersepsi `adblock-rust`, cosmetic filtering, dan JS fetch/XHR patch, serta mengizinkan alur `window.open("about:blank")` saat membuka dokumen dari Drive.
+- **Fix Address Bar Tertimpa URL Iframe/Tracker**: Memindahkan pembaruan `tab.url` dari `on_navigation` (yang ikut terpanggil oleh `<iframe>` di WebKitGTK) ke `on_page_load` (khusus main frame).
+- **Fix Linux Mint 22.2 / Ubuntu 24.04 Window Lock & Start Page Overlap**:
+  - Menetapkan `WEBKIT_DISABLE_DMABUF_RENDERER=1` secara otomatis di Linux untuk mencegah glitch repaint/compositing WebKitGTK 4.1.
+  - Memperbaiki ukuran awal jendela agar ramah layar laptop `1366×768` (`1180×680`, min `640×420`) serta menerapkan `gtk_window.set_geometry_hints(MIN_SIZE)` + `queue_resize/queue_draw` agar `GtkFixed` tidak mengunci resize maupun tombol Maximize.
+  - Menyembunyikan `#workspace` & `#newtab-page` di DOM saat tab web eksternal aktif sehingga Start Page tidak pernah menindih halaman web.
+- **Migrasi Repositori Resmi GitHub**: Memindahkan repositori resmi ke `https://github.com/vibrainstudioofficial/ViBrowse`.
+
+---
+
 ## [V1.2.2] — Upgrade Ad-Blocker ke Brave `adblock-rust` + Auto-Sync Filter List
 
 ### Peningkatan Utama

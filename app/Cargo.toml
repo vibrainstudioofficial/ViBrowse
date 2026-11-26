@@ -1,6 +1,6 @@
 [package]
 name = "vibrowse"
-version = "1.2.2"
+version = "1.2.3"
 description = "ViBrowse — Lightweight, low-RAM Chrome-compatible web browser built with Rust & Tauri"
 authors = ["ViBrowse"]
 edition = "2021"
@@ -26,6 +26,8 @@ windows-core = "0.62"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
+gtk = "0.18"
+gdk = "0.18"
 
 [profile.release]
 panic = "abort"

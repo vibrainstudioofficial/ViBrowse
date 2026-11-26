@@ -199,6 +199,46 @@ pub fn layout_webviews(app: &AppHandle) {
             }
         }
     }
+
+    #[cfg(target_os = "linux")]
+    refresh_linux_window_layout(app);
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_linux_window_layout(app: &AppHandle) {
+    use gtk::prelude::{GtkWindowExt, WidgetExt};
+    if let Some(window) = app.get_window("main") {
+        if let Ok(gtk_win) = window.gtk_window() {
+            gtk_win.set_resizable(true);
+            let geom = gdk::Geometry::new(
+                640,
+                420,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0.0,
+                0.0,
+                gdk::Gravity::NorthWest,
+            );
+            gtk_win.set_geometry_hints(
+                None::<&gtk::Widget>,
+                Some(&geom),
+                gdk::WindowHints::MIN_SIZE,
+            );
+            gtk_win.queue_resize();
+            gtk_win.queue_draw();
+        }
+    }
+    if let Some(chrome) = app.get_webview("chrome") {
+        let _ = chrome.with_webview(|platform_wv| {
+            let gtk_wv = platform_wv.inner();
+            gtk_wv.queue_resize();
+            gtk_wv.queue_draw();
+        });
+    }
 }
 
 fn handle_vibrowse_dl_url(app: &AppHandle, tab_id: &str, url: &Url) {
@@ -333,33 +373,6 @@ fn spawn_tab_webview(
                         emit_state(&app);
                         return false;
                     }
-                    let mut hist_title: Option<String> = None;
-                    {
-                        let mut inner = state.inner.lock().unwrap();
-                        if let Some(tab) = inner.tab_mut(&id) {
-                            tab.url = url_s.to_string();
-                            tab.detected_media.clear();
-                            if is_video_platform_url(url_s) {
-                                tab.detected_media.push(DetectedMedia {
-                                    url: url_s.to_string(),
-                                    filename: tab.title.clone(),
-                                    kind: "platform".to_string(),
-                                });
-                            }
-                            if !tab.is_incognito {
-                                hist_title =
-                                    Some(if tab.title == "New Tab" || tab.title.is_empty() {
-                                        nav_url.host_str().unwrap_or(url_s).to_string()
-                                    } else {
-                                        tab.title.clone()
-                                    });
-                            }
-                        }
-                    }
-                    if let Some(title) = hist_title {
-                        state.storage.record_history(&title, url_s);
-                    }
-                    emit_state(&app);
                 }
                 true
             }
@@ -394,14 +407,39 @@ fn spawn_tab_webview(
             move |wv, payload| {
                 if let Some(state) = app.try_state::<AppState>() {
                     let page_url = payload.url().to_string();
+                    let is_started = matches!(payload.event(), PageLoadEvent::Started);
+                    let mut hist_title: Option<String> = None;
                     let adblock_enabled = {
                         let mut inner = state.inner.lock().unwrap();
                         if let Some(tab) = inner.tab_mut(&id) {
-                            tab.is_loading = matches!(payload.event(), PageLoadEvent::Started);
+                            tab.is_loading = is_started;
+                            let url_changed = tab.url != page_url;
                             tab.url = page_url.clone();
+                            if is_started && url_changed {
+                                tab.detected_media.clear();
+                                if is_video_platform_url(&page_url) {
+                                    tab.detected_media.push(DetectedMedia {
+                                        url: page_url.clone(),
+                                        filename: tab.title.clone(),
+                                        kind: "platform".to_string(),
+                                    });
+                                }
+                                if !tab.is_incognito {
+                                    hist_title = Some(
+                                        if tab.title == "New Tab" || tab.title.is_empty() {
+                                            payload.url().host_str().unwrap_or(&page_url).to_string()
+                                        } else {
+                                            tab.title.clone()
+                                        },
+                                    );
+                                }
+                            }
                         }
                         inner.settings.adblock_enabled
                     };
+                    if let Some(title) = hist_title {
+                        state.storage.record_history(&title, &page_url);
+                    }
                     if let Some(css) = state.adblock.cosmetic_css_for_url(&page_url, adblock_enabled)
                     {
                         if let Ok(css_json) = serde_json::to_string(&css) {
@@ -470,6 +508,9 @@ fn spawn_tab_webview(
                 if url_s.starts_with("vibrowse-dl://") {
                     handle_vibrowse_dl_url(&app, &id, &new_url);
                     return NewWindowResponse::Deny;
+                }
+                if url_s == "about:blank" || url_s.is_empty() {
+                    return NewWindowResponse::Allow;
                 }
                 if let Some(state) = app.try_state::<AppState>() {
                     let (source_url, adblock_enabled, popup_blocker_enabled) = {

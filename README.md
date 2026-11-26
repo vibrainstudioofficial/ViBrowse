@@ -21,7 +21,7 @@
   </table>
   <p><strong>Browser Desktop Modern yang Ultra-Ringan (~2.45 MB), Hemat RAM, &amp; Kompatibel Setara Google Chrome</strong></p>
   <p>
-    <a href="https://browse.vibrain.id"><img src="https://img.shields.io/badge/Release-V1.2.2-2563eb?style=for-the-badge" alt="Version V1.2.2" /></a>
+    <a href="https://browse.vibrain.id"><img src="https://img.shields.io/badge/Release-V1.2.3-2563eb?style=for-the-badge" alt="Version V1.2.3" /></a>
     <img src="https://img.shields.io/badge/Built%20With-Rust%20%2B%20Tauri%20v2-f97316?style=for-the-badge" alt="Rust + Tauri v2" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=for-the-badge" alt="GPL-3.0 License" /></a>
   </p>
@@ -52,17 +52,17 @@
 
 ---
 
-## Unduh Rilis Resmi (V1.2.2)
+## Unduh Rilis Resmi (V1.2.3)
 
-Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.id/#unduh)** maupun **[GitHub Releases](https://github.com/fransetiaone/ViBrowse/releases/latest)**:
+Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.id/#unduh)** maupun **[GitHub Releases](https://github.com/vibrainstudioofficial/ViBrowse/releases/latest)**:
 
 | Platform | Paket | Ukuran | Tautan Unduh |
 | --- | --- | --- | --- |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.2-Setup.exe` | **2.80 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-Setup.exe) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-Setup.exe) |
-| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.2-Portable.zip` | **3.35 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-Portable.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-Portable.zip) |
-| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2.2-linux-amd64.deb` | **2.7 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-linux-amd64.deb) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-linux-amd64.deb) |
-| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2.2-linux-x86_64.rpm` | **3.0 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-linux-x86_64.rpm) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-linux-x86_64.rpm) |
-| **Source Code (Compile Sendiri)** | `ViBrowse-V1.2.2-source.zip` | **182 KB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.2-source.zip) • [GitHub](https://github.com/fransetiaone/ViBrowse/releases/download/V1.2.2/ViBrowse-V1.2.2-source.zip) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.3-Setup.exe` | **2.80 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.3-Setup.exe) • [GitHub](https://github.com/vibrainstudioofficial/ViBrowse/releases/download/V1.2.3/ViBrowse-V1.2.3-Setup.exe) |
+| **Windows 10 / 11 (x64)** | `ViBrowse-V1.2.3-Portable.zip` | **3.35 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.3-Portable.zip) • [GitHub](https://github.com/vibrainstudioofficial/ViBrowse/releases/download/V1.2.3/ViBrowse-V1.2.3-Portable.zip) |
+| **Linux Debian / Ubuntu (x64)** | `ViBrowse-V1.2.3-linux-amd64.deb` | **2.7 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.3-linux-amd64.deb) • [GitHub](https://github.com/vibrainstudioofficial/ViBrowse/releases/download/V1.2.3/ViBrowse-V1.2.3-linux-amd64.deb) |
+| **Linux Fedora / RHEL (x64)** | `ViBrowse-V1.2.3-linux-x86_64.rpm` | **3.0 MB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.3-linux-x86_64.rpm) • [GitHub](https://github.com/vibrainstudioofficial/ViBrowse/releases/download/V1.2.3/ViBrowse-V1.2.3-linux-x86_64.rpm) |
+| **Source Code (Compile Sendiri)** | `ViBrowse-V1.2.3-source.zip` | **182 KB** | [Cloudflare](https://browse.vibrain.id/download/ViBrowse-V1.2.3-source.zip) • [GitHub](https://github.com/vibrainstudioofficial/ViBrowse/releases/download/V1.2.3/ViBrowse-V1.2.3-source.zip) |
 
 ---
 
@@ -70,7 +70,12 @@ Unduh langsung lewat **[Website Resmi (Cloudflare Edge)](https://browse.vibrain.
 
 Seluruh riwayat lengkap tersedia di [**CHANGELOG.md**](CHANGELOG.md):
 
-### `V1.2.2` (Terbaru)
+### `V1.2.3` (Terbaru)
+- **Patch Google Workspace**: Perbaikan tidak bisa membuka **Google Drive, Google Sheets, & Google Docs** (whitelist subresource & JS Workspace + dukungan popup `about:blank`).
+- **Patch Linux Mint 22.2 / Ubuntu 24.04**: Fix jendela terkunci tidak bisa maximize (`GtkFixed` min-size hints + ukuran awal `1180×680`), fix Start Page menindih halaman web (`#workspace` hidden + `WEBKIT_DISABLE_DMABUF_RENDERER=1`), & fix address bar tertimpa URL iframe.
+- **Migrasi GitHub**: Repositori resmi kini berada di `vibrainstudioofficial/ViBrowse`.
+
+### `V1.2.2`
 - **Upgrade Ad-Blocker (`Brave adblock-rust`)**: Mengganti pemblokir statis dengan engine **`adblock-rust`** milik Brave + auto-sync **EasyList**, **EasyPrivacy**, **ABPindo**, & **Peter Lowe** (100.000+ aturan) dengan binary cache cepat, cosmetic filtering dinamis, tombol sync manual, serta **YouTube Ad-Stripper & Auto-Skipper**.
 - **Catatan Ukuran File**: Pemblokiran iklan kini jauh lebih baik & akurat dengan konsekuensi sedikit penambahan ukuran file binary.
 
