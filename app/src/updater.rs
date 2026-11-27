@@ -3,7 +3,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 
-pub const CURRENT_VERSION: &str = "V1.2.3";
+pub const CURRENT_VERSION: &str = "V1.2.4";
 const GITHUB_LATEST_URL: &str =
     "https://api.github.com/repos/vibrainstudioofficial/ViBrowse/releases/latest";
 const FALLBACK_MANIFEST_URL: &str = "https://browse.vibrain.id/version.json";

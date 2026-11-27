@@ -440,9 +440,82 @@ function renderDownloadsDashboard() {
 
 async function renderBookmarksPanel(body) {
   bookmarksCache = await invoke('cmd_list_bookmarks');
-  body.innerHTML = bookmarksCache.length === 0
-    ? '<p class="muted">No bookmarks yet. Click the star in the address bar to save a page.</p>'
-    : '';
+  const detected = await invoke('cmd_detect_browser_bookmarks').catch(() => []);
+
+  body.innerHTML = `
+    <div class="setting-group">
+      <strong>Import &amp; Export Bookmarks</strong>
+      ${detected.length > 0 ? `
+        <div class="muted">Terdeteksi browser di perangkat ini:</div>
+        <div id="bm-auto-import" class="panel-stack"></div>
+      ` : '<div class="muted">Import dari file HTML (Chrome/Edge/Firefox/Opera) atau backup bookmark Anda.</div>'}
+      <div class="panel-row">
+        <button id="btn-bm-import-html" class="btn btn-primary" style="flex:1;">Import HTML</button>
+        <button id="btn-bm-export-html" class="btn">Export HTML</button>
+        <input id="inp-bm-html" type="file" accept=".html,.htm" style="display:none;" />
+      </div>
+    </div>
+    <div id="bm-list-wrap" class="panel-stack"></div>
+  `;
+
+  if (detected.length > 0) {
+    const autoWrap = $('bm-auto-import');
+    for (const b of detected) {
+      const btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.textContent = `Import dari ${b.name} (${b.count} bookmark)`;
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = `Mengimpor dari ${b.name}...`;
+        try {
+          const added = await invoke('cmd_import_browser_bookmarks', { browserId: b.id });
+          await refreshBookmarks();
+          alert(`Berhasil mengimpor ${added} bookmark baru dari ${b.name}!`);
+          renderSidePanel();
+        } catch (err) {
+          alert(String(err));
+          btn.disabled = false;
+          btn.textContent = `Import dari ${b.name} (${b.count} bookmark)`;
+        }
+      };
+      autoWrap.appendChild(btn);
+    }
+  }
+
+  $('btn-bm-import-html').onclick = () => $('inp-bm-html').click();
+  $('inp-bm-html').onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const html = await file.text();
+      const added = await invoke('cmd_import_bookmarks_html', { html });
+      await refreshBookmarks();
+      alert(`Berhasil mengimpor ${added} bookmark baru dari ${file.name}!`);
+      renderSidePanel();
+    } catch (err) {
+      alert(String(err));
+    }
+  };
+  $('btn-bm-export-html').onclick = async () => {
+    try {
+      const html = await invoke('cmd_export_bookmarks_html');
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'vibrowse-bookmarks.html';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(String(err));
+    }
+  };
+
+  const listWrap = $('bm-list-wrap');
+  if (bookmarksCache.length === 0) {
+    listWrap.innerHTML = '<p class="muted">No bookmarks yet. Click the star in the address bar to save a page.</p>';
+    return;
+  }
 
   for (const bm of bookmarksCache) {
     const el = document.createElement('div');
@@ -460,7 +533,7 @@ async function renderBookmarksPanel(body) {
       await refreshBookmarks();
       renderSidePanel();
     };
-    body.appendChild(el);
+    listWrap.appendChild(el);
   }
 }
 
@@ -716,6 +789,23 @@ function renderSettingsPanel(body) {
       </div>
     </div>
     <div class="setting-group">
+      <strong>Custom DNS (DNS-over-HTTPS / DoH)</strong>
+      <div class="muted">DNS terenkripsi native WebView2 (Windows). Perubahan DNS aktif setelah ViBrowse di-restart.</div>
+      <div class="setting-row">
+        <label for="sel-dns"><strong>Provider DNS</strong></label>
+        <select id="sel-dns" class="setting-select">
+          <option value="system">System Default (OS)</option>
+          <option value="cloudflare">Cloudflare (1.1.1.1)</option>
+          <option value="google">Google Public DNS (8.8.8.8)</option>
+          <option value="adguard">AdGuard DNS (AdBlock)</option>
+          <option value="quad9">Quad9 (Security)</option>
+          <option value="custom">Custom DoH URL</option>
+        </select>
+      </div>
+      <input id="inp-custom-dns" class="panel-search ${(state.settings.dns_mode || 'system') === 'custom' ? '' : 'hidden'}" placeholder="https://dns.nextdns.io/xxxxxx" value="${escapeHtml(state.settings.custom_dns_url || '')}" />
+      <button id="btn-dns-save-restart" class="btn btn-primary">Simpan &amp; Restart ViBrowse</button>
+    </div>
+    <div class="setting-group">
       <strong>Default Browser</strong>
       <div class="muted">${state.is_default_browser ? 'ViBrowse sudah menjadi browser default Anda.' : 'ViBrowse belum menjadi browser default.'}</div>
       <div class="panel-row">
@@ -732,7 +822,7 @@ function renderSettingsPanel(body) {
             ? state.available_update.has_update
               ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
               : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
-            : 'Versi terpasang: V1.2.3'
+            : 'Versi terpasang: V1.2.4'
       }</div>
       <div class="panel-row">
         <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>
@@ -768,6 +858,7 @@ function renderSettingsPanel(body) {
   $('sel-theme').value = state.settings.theme || 'dark';
   $('sel-search').value = state.settings.search_engine;
   $('sel-sleep').value = String(state.settings.tab_sleep_minutes);
+  $('sel-dns').value = state.settings.dns_mode || 'system';
 
   const save = () => saveSettings({
     theme: $('sel-theme').value,
@@ -775,12 +866,28 @@ function renderSettingsPanel(body) {
     tab_sleep_minutes: Number($('sel-sleep').value),
     show_bookmarks_bar: $('chk-bmbar').checked,
     check_default_browser: $('chk-defcheck').checked,
+    dns_mode: $('sel-dns').value,
+    custom_dns_url: $('inp-custom-dns').value.trim(),
   });
   $('sel-theme').onchange = save;
   $('sel-search').onchange = save;
   $('sel-sleep').onchange = save;
   $('chk-bmbar').onchange = save;
   $('chk-defcheck').onchange = save;
+  $('sel-dns').onchange = () => {
+    $('inp-custom-dns').classList.toggle('hidden', $('sel-dns').value !== 'custom');
+    save();
+  };
+  $('btn-dns-save-restart').onclick = async () => {
+    const mode = $('sel-dns').value;
+    const customUrl = $('inp-custom-dns').value.trim();
+    if (mode === 'custom' && !customUrl.startsWith('https://')) {
+      alert('Custom DoH URL harus diawali dengan https:// (contoh: https://dns.nextdns.io/xxxxxx)');
+      return;
+    }
+    await save();
+    await invoke('cmd_restart_app');
+  };
   const setDefBtn = $('btn-settings-set-default');
   if (setDefBtn) {
     setDefBtn.onclick = () => invoke('cmd_set_default_browser').catch((err) => alert(String(err)));

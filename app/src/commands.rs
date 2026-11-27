@@ -204,6 +204,43 @@ pub fn cmd_remove_bookmark(
     Ok(())
 }
 
+#[tauri::command]
+pub fn cmd_detect_browser_bookmarks() -> Vec<crate::storage::DetectedBrowserBookmarks> {
+    crate::storage::detect_browser_bookmarks()
+}
+
+#[tauri::command]
+pub fn cmd_import_browser_bookmarks(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    browser_id: String,
+) -> Result<usize, String> {
+    let count = state.storage.import_browser_bookmarks(&browser_id)?;
+    emit_state(&app);
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn cmd_import_bookmarks_html(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    html: String,
+) -> Result<usize, String> {
+    let count = state.storage.import_bookmarks_html(&html)?;
+    emit_state(&app);
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn cmd_export_bookmarks_html(state: State<'_, AppState>) -> String {
+    state.storage.export_bookmarks_html()
+}
+
+#[tauri::command]
+pub fn cmd_restart_app(app: AppHandle) {
+    app.restart();
+}
+
 // ---- History & Omnibox ----
 
 #[tauri::command]

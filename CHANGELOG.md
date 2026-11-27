@@ -2,6 +2,19 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2.4] — Fix Download Pause/Stop, Custom DNS (DoH), & Import/Export Bookmarks
+
+### Perbaikan & Fitur Baru
+- **Fix Tombol Pause & Stop Download Manager**:
+  - Memperbaiki Pause & Stop pada **IDM HTTP Multi-Koneksi** dengan `tokio::select!` + `Notify`: klik Pause kini benar-benar menutup koneksi TCP (0 B/s) lalu melanjutkan tepat dari byte offset (`Range`) saat Resume; klik Stop langsung menghentikan unduhan & menghapus file parsial seketika.
+  - Memperbaiki Pause & Stop pada **Video Downloader (`yt-dlp`)**: menambahkan `--continue` untuk Pause/Resume nyata serta terminasi process tree instan (`taskkill /F /T /PID` di Windows) saat Stop.
+- **Custom DNS (DNS-over-HTTPS / DoH)**: Pilihan DNS terenkripsi native WebView2 di panel **Settings** dengan preset **Cloudflare (`1.1.1.1`)**, **Google (`8.8.8.8`)**, **AdGuard DNS**, **Quad9**, dan **Custom DoH URL** (NextDNS, dll.) lengkap dengan tombol **Simpan & Restart ViBrowse**.
+- **Import & Export Bookmarks**:
+  - Auto-detect 1-klik dari browser terpasang (**Google Chrome**, **Microsoft Edge**, **Brave**, **Vivaldi**, **Opera**) di Windows & Linux.
+  - Import dari file standar **Netscape Bookmark HTML (`bookmarks.html`)** (Firefox/Chrome/Edge/Safari) serta tombol **Export HTML** di panel Bookmarks.
+
+---
+
 ## [V1.2.3] — Fix Google Drive/Docs/Sheets, Linux Mint GTK3 Maximize & WebKitGTK Repaint
 
 ### Perbaikan Bug

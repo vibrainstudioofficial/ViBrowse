@@ -1,6 +1,6 @@
 [package]
 name = "vibrowse"
-version = "1.2.3"
+version = "1.2.4"
 description = "ViBrowse — Lightweight, low-RAM Chrome-compatible web browser built with Rust & Tauri"
 authors = ["ViBrowse"]
 edition = "2021"

@@ -17,7 +17,38 @@ use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WindowEvent};
 
+#[cfg(target_os = "windows")]
+fn apply_windows_doh_from_settings() {
+    if let Some(roaming) = dirs::data_dir() {
+        let db_path = roaming.join("com.vibrowse.browser").join("vibrowse.db");
+        if db_path.exists() {
+            if let Ok(storage) = Storage::open(db_path) {
+                let settings = storage.load_settings();
+                if let Some(doh_url) =
+                    storage::resolve_doh_template(&settings.dns_mode, &settings.custom_dns_url)
+                {
+                    let existing =
+                        std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+                    let doh_flags = format!(
+                        "--dns-over-https-mode=secure --dns-over-https-templates=\"{}\"",
+                        doh_url
+                    );
+                    let merged = if existing.trim().is_empty() {
+                        doh_flags
+                    } else {
+                        format!("{} {}", existing, doh_flags)
+                    };
+                    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", merged);
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "windows")]
+    apply_windows_doh_from_settings();
+
     #[cfg(target_os = "linux")]
     {
         // Prevent WebKitGTK 4.1 DMABUF compositing/repaint glitches on Ubuntu 24.04 / Linux Mint 22.x
@@ -161,6 +192,11 @@ fn main() {
             commands::cmd_list_bookmarks,
             commands::cmd_toggle_bookmark,
             commands::cmd_remove_bookmark,
+            commands::cmd_detect_browser_bookmarks,
+            commands::cmd_import_browser_bookmarks,
+            commands::cmd_import_bookmarks_html,
+            commands::cmd_export_bookmarks_html,
+            commands::cmd_restart_app,
             commands::cmd_list_history,
             commands::cmd_delete_history_entry,
             commands::cmd_clear_history,

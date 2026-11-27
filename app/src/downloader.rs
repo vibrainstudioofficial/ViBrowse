@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -98,6 +98,7 @@ pub struct EngineStatusDto {
 struct TaskControl {
     paused: Arc<AtomicBool>,
     canceled: Arc<AtomicBool>,
+    notify: Arc<Notify>,
     torrent_id: Option<usize>,
     torrent_handle: Option<Arc<ManagedTorrent>>,
 }
@@ -131,7 +132,7 @@ fn update_task(
 }
 
 /// Blocks while `paused` is true and returns `true` if `canceled` was triggered.
-async fn wait_if_paused(paused: &AtomicBool, canceled: &AtomicBool) -> bool {
+async fn wait_if_paused(paused: &AtomicBool, canceled: &AtomicBool, notify: &Notify) -> bool {
     if canceled.load(Ordering::Relaxed) {
         return true;
     }
@@ -139,9 +140,23 @@ async fn wait_if_paused(paused: &AtomicBool, canceled: &AtomicBool) -> bool {
         if canceled.load(Ordering::Relaxed) {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        let _ = tokio::time::timeout(Duration::from_millis(250), notify.notified()).await;
     }
-    false
+    canceled.load(Ordering::Relaxed)
+}
+
+/// Immediately terminates a child process and its process tree (e.g. `yt-dlp` + `ffmpeg`).
+async fn kill_process_tree(child: &mut tokio::process::Child) {
+    #[cfg(target_os = "windows")]
+    if let Some(pid) = child.id() {
+        let mut killer = std::process::Command::new("taskkill");
+        killer.args(["/F", "/T", "/PID", &pid.to_string()]);
+        use std::os::windows::process::CommandExt;
+        killer.creation_flags(CREATE_NO_WINDOW);
+        let _ = killer.output();
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 impl DownloadManager {
@@ -184,9 +199,10 @@ impl DownloadManager {
         task: DownloadTaskDto,
         torrent_id: Option<usize>,
         torrent_handle: Option<Arc<ManagedTorrent>>,
-    ) -> (Arc<AtomicBool>, Arc<AtomicBool>) {
+    ) -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<Notify>) {
         let paused = Arc::new(AtomicBool::new(false));
         let canceled = Arc::new(AtomicBool::new(false));
+        let notify = Arc::new(Notify::new());
         let id = task.id.clone();
 
         self.tasks.lock().unwrap().insert(0, task);
@@ -195,12 +211,13 @@ impl DownloadManager {
             TaskControl {
                 paused: paused.clone(),
                 canceled: canceled.clone(),
+                notify: notify.clone(),
                 torrent_id,
                 torrent_handle,
             },
         );
         Self::emit_dm(app);
-        (paused, canceled)
+        (paused, canceled, notify)
     }
 
     pub fn resolve_binary_in_path(name: &str) -> Option<PathBuf> {
@@ -315,7 +332,7 @@ impl DownloadManager {
             conn_count,
             format!("{}-Conn IDM", conn_count),
         );
-        let (paused, canceled) = self.register_task(&app, task, None, None);
+        let (paused, canceled, notify) = self.register_task(&app, task, None, None);
 
         let client = self.client.clone();
         let tasks = self.tasks.clone();
@@ -323,7 +340,7 @@ impl DownloadManager {
 
         tauri::async_runtime::spawn(async move {
             run_http_task(
-                app, client, tasks, task_id, url, save_path, conn_count, paused, canceled,
+                app, client, tasks, task_id, url, save_path, conn_count, paused, canceled, notify,
             )
             .await;
         });
@@ -404,7 +421,7 @@ impl DownloadManager {
             4,
             quality_label.to_string(),
         );
-        let (_paused, canceled) = self.register_task(&app, task, None, None);
+        let (paused, canceled, notify) = self.register_task(&app, task, None, None);
 
         let tasks = self.tasks.clone();
         let download_dir = self.download_dir.clone();
@@ -441,16 +458,23 @@ impl DownloadManager {
                 }
             };
 
-            // Two-pass execution: Pass 1 uses requested quality + detected JS runtime (EJS);
-            // if Pass 1 fails, Pass 2 automatically retries with universal fallback clients/format.
+            // Two-pass execution with true Pause/Resume (`--continue`) and instant Stop (`taskkill`).
             let mut last_error = String::new();
             let mut succeeded = false;
+            let mut attempt = 0u8;
 
-            for attempt in 0..2 {
-                if canceled.load(Ordering::Relaxed) {
-                    break;
+            while attempt < 2 {
+                if wait_if_paused(&paused, &canceled, &notify).await {
+                    update_task(&tasks, &task_id, |t| {
+                        t.status = TaskStatus::Canceled;
+                        t.speed_bps = 0;
+                        t.eta_secs = 0;
+                    });
+                    Self::emit_dm(&app);
+                    return;
                 }
                 let mut args: Vec<String> = vec![
+                    "--continue".into(),
                     "--no-playlist".into(),
                     "--windows-filenames".into(),
                     "--no-check-certificates".into(),
@@ -545,18 +569,62 @@ impl DownloadManager {
                     })
                 });
 
+                let mut was_paused = false;
                 if let Some(out) = child.stdout.take() {
                     let mut reader = BufReader::new(out).lines();
                     let mut last_emit = Instant::now();
-                    while let Ok(Some(line)) = reader.next_line().await {
+                    loop {
+                        let next_line = tokio::select! {
+                            biased;
+                            _ = notify.notified() => {
+                                if canceled.load(Ordering::Relaxed) {
+                                    kill_process_tree(&mut child).await;
+                                    update_task(&tasks, &task_id, |t| {
+                                        t.status = TaskStatus::Canceled;
+                                        t.speed_bps = 0;
+                                        t.eta_secs = 0;
+                                    });
+                                    Self::emit_dm(&app);
+                                    return;
+                                }
+                                if paused.load(Ordering::Relaxed) {
+                                    kill_process_tree(&mut child).await;
+                                    update_task(&tasks, &task_id, |t| {
+                                        t.status = TaskStatus::Paused;
+                                        t.speed_bps = 0;
+                                        t.eta_secs = 0;
+                                    });
+                                    Self::emit_dm(&app);
+                                    was_paused = true;
+                                    break;
+                                }
+                                continue;
+                            }
+                            line_res = reader.next_line() => line_res,
+                        };
+                        let Ok(Some(line)) = next_line else {
+                            break;
+                        };
                         if canceled.load(Ordering::Relaxed) {
-                            let _ = child.kill().await;
+                            kill_process_tree(&mut child).await;
                             update_task(&tasks, &task_id, |t| {
                                 t.status = TaskStatus::Canceled;
                                 t.speed_bps = 0;
+                                t.eta_secs = 0;
                             });
                             Self::emit_dm(&app);
                             return;
+                        }
+                        if paused.load(Ordering::Relaxed) {
+                            kill_process_tree(&mut child).await;
+                            update_task(&tasks, &task_id, |t| {
+                                t.status = TaskStatus::Paused;
+                                t.speed_bps = 0;
+                                t.eta_secs = 0;
+                            });
+                            Self::emit_dm(&app);
+                            was_paused = true;
+                            break;
                         }
                         let trimmed = line.trim();
                         let dest_opt = trimmed
@@ -608,6 +676,11 @@ impl DownloadManager {
                     }
                 }
 
+                if was_paused {
+                    // Keep the same attempt index so resuming continues via `--continue`.
+                    continue;
+                }
+
                 let err_msg = match stderr_handle {
                     Some(h) => h.await.unwrap_or_default(),
                     None => String::new(),
@@ -629,6 +702,7 @@ impl DownloadManager {
                         last_error = e.to_string();
                     }
                 }
+                attempt += 1;
             }
 
             if succeeded {
@@ -723,7 +797,8 @@ impl DownloadManager {
             0,
             "BitTorrent P2P".to_string(),
         );
-        let (paused, canceled) = self.register_task(&app, task, Some(rq_id), Some(handle.clone()));
+        let (paused, canceled, notify) =
+            self.register_task(&app, task, Some(rq_id), Some(handle.clone()));
 
         let tasks = self.tasks.clone();
         let task_id = id.clone();
@@ -731,7 +806,15 @@ impl DownloadManager {
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(1));
             loop {
-                ticker.tick().await;
+                tokio::select! {
+                    biased;
+                    _ = notify.notified() => {
+                        if canceled.load(Ordering::Relaxed) {
+                            break;
+                        }
+                    }
+                    _ = ticker.tick() => {}
+                }
                 if canceled.load(Ordering::Relaxed) {
                     break;
                 }
@@ -793,6 +876,7 @@ impl DownloadManager {
                 .get(id)
                 .ok_or_else(|| "Task tidak ditemukan".to_string())?;
             ctrl.paused.store(true, Ordering::Relaxed);
+            ctrl.notify.notify_waiters();
             ctrl.torrent_handle.clone()
         };
 
@@ -805,6 +889,7 @@ impl DownloadManager {
             if matches!(t.status, TaskStatus::Downloading | TaskStatus::Queued) {
                 t.status = TaskStatus::Paused;
                 t.speed_bps = 0;
+                t.eta_secs = 0;
             }
         });
         Self::emit_dm(&app);
@@ -818,6 +903,7 @@ impl DownloadManager {
                 .get(id)
                 .ok_or_else(|| "Task tidak ditemukan".to_string())?;
             ctrl.paused.store(false, Ordering::Relaxed);
+            ctrl.notify.notify_waiters();
             ctrl.torrent_handle.clone()
         };
 
@@ -841,6 +927,7 @@ impl DownloadManager {
             controls.get(id).and_then(|ctrl| {
                 ctrl.canceled.store(true, Ordering::Relaxed);
                 ctrl.paused.store(false, Ordering::Relaxed);
+                ctrl.notify.notify_waiters();
                 ctrl.torrent_id
             })
         };
@@ -886,6 +973,7 @@ async fn run_http_task(
     connections: u32,
     paused: Arc<AtomicBool>,
     canceled: Arc<AtomicBool>,
+    notify: Arc<Notify>,
 ) {
     update_task(&tasks, &id, |t| t.status = TaskStatus::Downloading);
     DownloadManager::emit_dm(&app);
@@ -990,10 +1078,14 @@ async fn run_http_task(
             &downloaded,
             &paused,
             &canceled,
+            &notify,
         )
         .await
     } else {
-        run_single_http(&client, &url, &save_path, &downloaded, &paused, &canceled).await
+        run_single_http(
+            &client, &url, &save_path, &downloaded, &paused, &canceled, &notify,
+        )
+        .await
     };
 
     stop_reporter.store(true, Ordering::Relaxed);
@@ -1041,6 +1133,7 @@ async fn run_segmented_http(
     downloaded: &Arc<AtomicU64>,
     paused: &Arc<AtomicBool>,
     canceled: &Arc<AtomicBool>,
+    notify: &Arc<Notify>,
 ) -> Result<(), String> {
     let file = OpenOptions::new()
         .create(true)
@@ -1070,6 +1163,7 @@ async fn run_segmented_http(
         let downloaded = downloaded.clone();
         let paused = paused.clone();
         let canceled = canceled.clone();
+        let notify = notify.clone();
 
         handles.push(tauri::async_runtime::spawn(async move {
             let mut file = OpenOptions::new()
@@ -1077,27 +1171,64 @@ async fn run_segmented_http(
                 .open(&path)
                 .await
                 .map_err(|e| e.to_string())?;
-            file.seek(SeekFrom::Start(start))
-                .await
-                .map_err(|e| e.to_string())?;
+            let mut offset = start;
 
-            let mut resp = client
-                .get(&url)
-                .header(RANGE, format!("bytes={}-{}", start, end))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-            if !resp.status().is_success() {
-                return Err(format!("Segment {} HTTP {}", idx, resp.status()));
-            }
-            while let Some(bytes) = resp.chunk().await.map_err(|e| e.to_string())? {
-                if wait_if_paused(&paused, &canceled).await {
+            while offset <= end {
+                if wait_if_paused(&paused, &canceled, &notify).await {
                     return Ok(());
                 }
-                file.write_all(&bytes).await.map_err(|e| e.to_string())?;
-                downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                file.seek(SeekFrom::Start(offset))
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let req_fut = client
+                    .get(&url)
+                    .header(RANGE, format!("bytes={}-{}", offset, end))
+                    .send();
+                let mut resp = tokio::select! {
+                    biased;
+                    _ = notify.notified() => {
+                        if canceled.load(Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                    r = req_fut => r.map_err(|e| e.to_string())?,
+                };
+                if !resp.status().is_success() {
+                    return Err(format!("Segment {} HTTP {}", idx, resp.status()));
+                }
+                loop {
+                    let chunk_opt = tokio::select! {
+                        biased;
+                        _ = notify.notified() => {
+                            if canceled.load(Ordering::Relaxed) {
+                                return Ok(());
+                            }
+                            if paused.load(Ordering::Relaxed) {
+                                // Drop HTTP response immediately so network traffic stops at 0 B/s.
+                                break;
+                            }
+                            continue;
+                        }
+                        c = resp.chunk() => c.map_err(|e| e.to_string())?,
+                    };
+                    let Some(bytes) = chunk_opt else {
+                        break;
+                    };
+                    if canceled.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                    let n = bytes.len() as u64;
+                    offset += n;
+                    downloaded.fetch_add(n, Ordering::Relaxed);
+                    if paused.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+                file.flush().await.map_err(|e| e.to_string())?;
             }
-            file.flush().await.map_err(|e| e.to_string())?;
             Ok::<(), String>(())
         }));
     }
@@ -1115,18 +1246,45 @@ async fn run_single_http(
     downloaded: &Arc<AtomicU64>,
     paused: &Arc<AtomicBool>,
     canceled: &Arc<AtomicBool>,
+    notify: &Arc<Notify>,
 ) -> Result<(), String> {
-    let mut resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if wait_if_paused(paused, canceled, notify).await {
+        return Ok(());
+    }
+    let req_fut = client.get(url).send();
+    let mut resp = tokio::select! {
+        biased;
+        _ = notify.notified() => {
+            if canceled.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            client.get(url).send().await.map_err(|e| e.to_string())?
+        }
+        r = req_fut => r.map_err(|e| e.to_string())?,
+    };
     if !resp.status().is_success() {
         return Err(format!("HTTP error: {}", resp.status()));
     }
     let mut file = tokio::fs::File::create(save_path)
         .await
         .map_err(|e| e.to_string())?;
-    while let Some(bytes) = resp.chunk().await.map_err(|e| e.to_string())? {
-        if wait_if_paused(paused, canceled).await {
+    loop {
+        if wait_if_paused(paused, canceled, notify).await {
             return Ok(());
         }
+        let chunk_opt = tokio::select! {
+            biased;
+            _ = notify.notified() => {
+                if canceled.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                continue;
+            }
+            c = resp.chunk() => c.map_err(|e| e.to_string())?,
+        };
+        let Some(bytes) = chunk_opt else {
+            break;
+        };
         file.write_all(&bytes).await.map_err(|e| e.to_string())?;
         downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
     }

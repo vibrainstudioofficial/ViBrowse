@@ -434,7 +434,7 @@ impl AdBlocker {
 
     async fn sync_filters_inner(&self) -> Result<AdblockStatusDto, String> {
         let client = reqwest::Client::builder()
-            .user_agent("ViBrowse/1.2.3 (adblock-rust)")
+            .user_agent("ViBrowse/1.2.4 (adblock-rust)")
             .timeout(Duration::from_secs(25))
             .build()
             .map_err(|e| format!("HTTP client error: {}", e))?;
