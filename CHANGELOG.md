@@ -2,6 +2,14 @@
 
 Seluruh perubahan penting pada proyek **ViBrowse** dicatat di dokumen ini.
 
+## [V1.2.5] — Hotfix `yt-dlp` Non-UTF-8 Broken Pipe & Network Retry
+
+### Perbaikan Bug
+- **Fix `yt-dlp berhenti dengan kode exit code: 1` pada Video Berjudul Emoji/Unicode**: Mengganti pembacaan `stdout` & `stderr` `yt-dlp` dari `BufReader::lines()` (strict UTF-8) menjadi `read_until(b'\n')` + `String::from_utf8_lossy()` agar karakter non-UTF-8/emoji pada judul video YouTube/Shorts tidak lagi memutus pipe unduhan.
+- **Peningkatan Toleransi Jaringan `yt-dlp`**: Menaikkan `--retries 10`, `--fragment-retries 10`, dan `--socket-timeout 30` agar lebih tahan terhadap jitter/timeout koneksi ISP.
+
+---
+
 ## [V1.2.4] — Fix Download Pause/Stop, Custom DNS (DoH), & Import/Export Bookmarks
 
 ### Perbaikan & Fitur Baru

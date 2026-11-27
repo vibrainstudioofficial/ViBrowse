@@ -822,7 +822,7 @@ function renderSettingsPanel(body) {
             ? state.available_update.has_update
               ? `Versi baru ${escapeHtml(state.available_update.latest_version)} tersedia!`
               : `ViBrowse ${escapeHtml(state.available_update.current_version)} sudah versi terbaru.`
-            : 'Versi terpasang: V1.2.4'
+            : 'Versi terpasang: V1.2.5'
       }</div>
       <div class="panel-row">
         <button id="btn-settings-check-update" class="btn" style="flex:1;">Cek Update</button>

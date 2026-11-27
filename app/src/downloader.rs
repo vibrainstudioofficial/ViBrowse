@@ -481,9 +481,11 @@ impl DownloadManager {
                     "--newline".into(),
                     "--progress".into(),
                     "--retries".into(),
-                    "3".into(),
+                    "10".into(),
                     "--fragment-retries".into(),
-                    "3".into(),
+                    "10".into(),
+                    "--socket-timeout".into(),
+                    "30".into(),
                     "--concurrent-fragments".into(),
                     "4".into(),
                     "-P".into(),
@@ -557,13 +559,19 @@ impl DownloadManager {
 
                 let stderr_handle = child.stderr.take().map(|err_io| {
                     tauri::async_runtime::spawn(async move {
-                        let mut reader = BufReader::new(err_io).lines();
+                        let mut reader = BufReader::new(err_io);
+                        let mut buf = Vec::new();
                         let mut last_err = String::new();
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            let t = line.trim();
+                        while let Ok(n) = reader.read_until(b'\n', &mut buf).await {
+                            if n == 0 {
+                                break;
+                            }
+                            let raw = String::from_utf8_lossy(&buf);
+                            let t = raw.trim();
                             if !t.is_empty() && (t.starts_with("ERROR:") || last_err.is_empty()) {
                                 last_err = t.to_string();
                             }
+                            buf.clear();
                         }
                         last_err
                     })
@@ -571,10 +579,12 @@ impl DownloadManager {
 
                 let mut was_paused = false;
                 if let Some(out) = child.stdout.take() {
-                    let mut reader = BufReader::new(out).lines();
+                    let mut reader = BufReader::new(out);
+                    let mut buf = Vec::new();
                     let mut last_emit = Instant::now();
                     loop {
-                        let next_line = tokio::select! {
+                        buf.clear();
+                        let read_res = tokio::select! {
                             biased;
                             _ = notify.notified() => {
                                 if canceled.load(Ordering::Relaxed) {
@@ -600,11 +610,15 @@ impl DownloadManager {
                                 }
                                 continue;
                             }
-                            line_res = reader.next_line() => line_res,
+                            r = reader.read_until(b'\n', &mut buf) => r,
                         };
-                        let Ok(Some(line)) = next_line else {
+                        let Ok(n) = read_res else {
                             break;
                         };
+                        if n == 0 {
+                            break;
+                        }
+                        let line = String::from_utf8_lossy(&buf).into_owned();
                         if canceled.load(Ordering::Relaxed) {
                             kill_process_tree(&mut child).await;
                             update_task(&tasks, &task_id, |t| {
